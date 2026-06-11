@@ -59,6 +59,42 @@ left to the platform's existing key chain (Ed25519/cosign), so the module stays
 dependency-free. This is an **integrity / reproducibility** guarantee, NOT a
 formal proof of correctness.
 
+## Agentic routing, receipt chains & CLI (v0.4.0, additive)
+Everything below is additive — the v0.3.0 API and all prior tests are unchanged.
+
+**Sparse top-k routing.** Alongside the original argmax `route()`, `route_topk()`
+routes an observation to its *k* best-aligned compartments with normalized
+softmax gating weights over their cosine scores (k=1 reproduces argmax):
+```python
+from yarqa import build_experts, route_topk
+rk = route_topk(observation_velocity, experts, k=2, temperature=1.0)
+rk.compartment_ids, rk.weights   # best-first ids; softmax weights summing to 1.0
+```
+Concept inspiration only: the sparsely-gated mixture-of-experts idea (Shazeer et
+al., 2017). All code is original SZL work; the "experts" are physical flow
+compartments, not learned networks.
+
+**Append-only receipt chain.** `ReceiptChain` hash-links `AgentStep` receipts
+(`prev_digest -> digest`) into a tamper-evident log: editing, reordering,
+inserting, or deleting any past step breaks `verify()`. This is an
+**integrity / ordering** mechanism, not a proof of correctness and not a locked
+theorem.
+```python
+from yarqa import ReceiptChain
+chain = ReceiptChain()
+for step in agent_steps:
+    chain.append(step)
+chain.verify()["ok"]   # True only if the whole chain is intact
+```
+
+**CLI.** Real entry points over the simple `.npz` mesh format (numpy-only; no
+OpenFOAM dependency). A `try_load_openfoam()` hook is a guarded, honest stub.
+```bash
+python -m yarqa.cli sample mesh.npz                 # SAMPLE synthetic mesh
+python -m yarqa.cli compartmentalize mesh.npz --receipt r.json
+python -m yarqa.cli verify mesh.npz r.json          # reproduce + confirm
+```
+
 ## Provenance & honesty
 Clean-room implementation from a published algorithm description — no third-party
 (incl. AGPL) source copied. See [`PROVENANCE.md`](PROVENANCE.md). **`yarqa` is an

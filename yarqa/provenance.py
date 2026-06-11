@@ -92,6 +92,31 @@ class Receipt:
         """SHA-256 of the canonical receipt — the bytes a signer would sign."""
         return hashlib.sha256(self.to_canonical_json().encode()).hexdigest()
 
+    @classmethod
+    def from_json(cls, text: str) -> "Receipt":
+        """Reconstruct a Receipt from JSON (e.g. ``to_canonical_json`` output).
+
+        Loading does not trust the contents; pass the result to
+        :func:`verify` to confirm it reproduces from the mesh. Unknown keys are
+        ignored and missing optional keys fall back to their defaults so older
+        receipts remain loadable.
+        """
+        data = json.loads(text)
+        return cls(
+            schema=data["schema"],
+            yarqa_version=data["yarqa_version"],
+            created_utc=data["created_utc"],
+            params=data["params"],
+            inputs=data["inputs"],
+            result_hash=data["result_hash"],
+            n_compartments=int(data["n_compartments"]),
+            environment=data["environment"],
+            claim_tier=data.get(
+                "claim_tier",
+                "engineering-method-cfd; integrity-receipt; NOT a locked theorem",
+            ),
+        )
+
 
 def compartmentalize_with_receipt(
     mesh: Mesh,
