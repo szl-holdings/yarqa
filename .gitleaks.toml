@@ -1,0 +1,11 @@
+# yarqa gitleaks config — extends the built-in default ruleset.
+title = "yarqa gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vendored third-party assets (no SZL secrets live here)."
+paths = [
+  '''space/static/lib/three\.min\.js''',
+]
