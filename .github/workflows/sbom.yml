@@ -21,8 +21,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - name: Install Syft
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+      - name: Install Syft (pinned + checksum-verified)
+        run: |
+          set -euo pipefail
+          SYFT_VER=1.45.1
+          SYFT_SHA=20c84195e24927f50a3b2269946be51f4c4abc9d2f145fee7388b4199149f716
+          curl -sSfL -o syft.tar.gz \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VER}/syft_${SYFT_VER}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA}  syft.tar.gz" | sha256sum -c -
+          tar -xzf syft.tar.gz -C /usr/local/bin syft
+          rm -f syft.tar.gz
+          syft version
       - name: Generate CycloneDX SBOM
         run: |
           set -euo pipefail
