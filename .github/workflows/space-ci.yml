@@ -1,0 +1,35 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+# CI for the yarqa package + Space endpoints. Actions are SHA-pinned.
+name: Space CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout@v4.1.7
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      # actions/setup-python@v5.1.1
+      - uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install -r space/requirements.txt pytest
+      - name: Package tests
+        run: pytest tests/ -q
+      - name: Space endpoint tests
+        run: pytest space/tests/test_space_endpoints.py -q
+      - name: Verify vendored THREE is r160 (sovereign, zero CDN)
+        run: |
+          grep -q "REVISION = '160'" space/static/lib/three.min.js
+          ! grep -riE "https?://(cdn|unpkg|cdnjs|jsdelivr|esm\.sh)" space/static/index.html space/static/js
