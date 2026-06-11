@@ -59,25 +59,137 @@ def build_experts(mesh: Mesh, labels: np.ndarray) -> list[Expert]:
     return experts
 
 
+def _cosine_scores(observation_velocity: np.ndarray, experts: list[Expert]) -> np.ndarray:
+    """Cosine alignment of the observation with every expert's mean flow.
+
+    Returns a (len(experts),) array of scores in [-1, 1]. A score of 0.0 is
+    used whenever either vector is (numerically) zero, so the gate stays honest
+    about "no information" rather than fabricating an alignment.
+    """
+    o = np.asarray(observation_velocity, dtype=float)
+    on = float(np.linalg.norm(o))
+    scores = np.zeros(len(experts), dtype=float)
+    for i, e in enumerate(experts):
+        en = float(np.linalg.norm(e.mean_velocity))
+        if on < 1e-12 or en < 1e-12:
+            scores[i] = 0.0
+        else:
+            scores[i] = float(np.dot(o, e.mean_velocity) / (on * en))
+    return scores
+
+
 def route(observation_velocity: np.ndarray, experts: list[Expert]) -> tuple[int, float]:
     """Route an observation to the best-matching compartment ('expert').
 
     Gating score = cosine alignment of the observation's flow with each
     compartment's mean flow. Returns (compartment_id, score). Transparent and
-    deterministic — no learned black-box gate.
+    deterministic — no learned black-box gate. This is the original argmax
+    router and remains the default; see :func:`route_topk` for the additive
+    sparse top-k variant.
     """
-    o = observation_velocity
-    on = np.linalg.norm(o)
-    best_id, best_score = -1, -np.inf
-    for e in experts:
-        en = np.linalg.norm(e.mean_velocity)
-        if on < 1e-12 or en < 1e-12:
-            score = 0.0
-        else:
-            score = float(np.dot(o, e.mean_velocity) / (on * en))
-        if score > best_score:
-            best_id, best_score = e.compartment_id, score
-    return best_id, best_score
+    if not experts:
+        return -1, -np.inf
+    scores = _cosine_scores(observation_velocity, experts)
+    # Deterministic tie-break: lowest index (and thus typically lowest
+    # compartment_id, which is built in sorted order) wins on equal scores.
+    best = int(np.argmax(scores))
+    return experts[best].compartment_id, float(scores[best])
+
+
+def _softmax(x: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+    """Numerically stable softmax over a 1-D score vector.
+
+    Standard max-shift trick for stability. ``temperature`` > 0 sharpens (<1)
+    or flattens (>1) the distribution; it must be strictly positive.
+    """
+    if temperature <= 0.0:
+        raise ValueError("temperature must be > 0")
+    z = np.asarray(x, dtype=float) / float(temperature)
+    z = z - np.max(z)
+    e = np.exp(z)
+    s = float(e.sum())
+    if s <= 0.0:  # pragma: no cover - defensive; exp() keeps this positive
+        return np.full_like(e, 1.0 / len(e))
+    return e / s
+
+
+@dataclass
+class RouteTopK:
+    """Result of a sparse top-k route.
+
+    Attributes
+    ----------
+    compartment_ids : list[int]
+        The k chosen experts' compartment ids, ordered best-first.
+    weights : list[float]
+        Softmax gating weights over the chosen experts (sum to 1.0).
+    scores : list[float]
+        Raw cosine scores of the chosen experts (parallel to ``compartment_ids``).
+    """
+
+    compartment_ids: list[int]
+    weights: list[float]
+    scores: list[float]
+
+    @property
+    def top1(self) -> int:
+        """The single best compartment id (matches :func:`route`'s argmax)."""
+        return self.compartment_ids[0] if self.compartment_ids else -1
+
+
+def route_topk(
+    observation_velocity: np.ndarray,
+    experts: list[Expert],
+    *,
+    k: int = 2,
+    temperature: float = 1.0,
+) -> RouteTopK:
+    """Sparse top-k routing with softmax gating weights over cosine scores.
+
+    Instead of committing all weight to a single expert (argmax), this selects
+    the ``k`` best-aligned compartments and assigns each a normalized softmax
+    weight computed over the SELECTED experts' cosine scores. The top-1
+    compartment always matches :func:`route`, so this is a strict additive
+    generalization (k=1 reproduces the argmax router with weight 1.0).
+
+    Concept inspiration only: the *sparsely-gated mixture-of-experts* idea of
+    routing each input to its top-k experts with normalized gate weights
+    (Shazeer et al., 2017, "Outrageously Large Neural Networks: The
+    Sparsely-Gated Mixture-of-Experts Layer"). We borrow the IDEA of top-k
+    sparse gating only; all code here is original SZL work and the "experts"
+    are physical flow compartments, not learned networks.
+
+    Parameters
+    ----------
+    k : int
+        Number of experts to route to. Clamped to ``[1, len(experts)]``.
+    temperature : float
+        Softmax temperature (> 0). Lower sharpens toward the top expert.
+
+    Returns
+    -------
+    RouteTopK
+        Chosen compartment ids (best-first), their softmax weights (sum 1.0),
+        and their raw cosine scores. Deterministic for a given input.
+    """
+    if not experts:
+        return RouteTopK(compartment_ids=[], weights=[], scores=[])
+    if k < 1:
+        raise ValueError("k must be >= 1")
+    k = min(k, len(experts))
+    scores = _cosine_scores(observation_velocity, experts)
+    # Select the k highest scores. argsort is ascending, so take the tail and
+    # reverse; a stable sort on (-score, index) gives a deterministic order
+    # with lowest index winning ties.
+    order = sorted(range(len(scores)), key=lambda i: (-scores[i], i))
+    chosen = order[:k]
+    chosen_scores = np.array([scores[i] for i in chosen], dtype=float)
+    weights = _softmax(chosen_scores, temperature=temperature)
+    return RouteTopK(
+        compartment_ids=[experts[i].compartment_id for i in chosen],
+        weights=[float(w) for w in weights],
+        scores=[float(s) for s in chosen_scores],
+    )
 
 
 # A "gate" returns ALLOW (True) / DENY (False). The default is permissive; the
@@ -106,6 +218,12 @@ class AgentStep:
     decision: str                      # "ALLOW" | "DENY"
     yarqa_receipt_digest: str          # ties to the cryptographic provenance receipt
     notes: str = ""
+    # Optional sparse top-k routing detail. These default to empty so that the
+    # original argmax path produces byte-identical AgentStep records; they are
+    # only populated when the agent runs in route_mode="topk".
+    route_mode: str = "argmax"
+    topk_compartments: list[int] = field(default_factory=list)
+    topk_weights: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -123,6 +241,14 @@ class AgenticYarqa:
     policy_gate: GateFn = _default_policy_gate
     doctrine_gate: GateFn = _default_doctrine_gate
     min_route_score: float = 0.0
+    # Routing mode is additive: "argmax" (default, unchanged behavior) or
+    # "topk" (sparse softmax-gated routing over the k best compartments). In
+    # topk mode the gated decision still uses the TOP-1 score, so gate/replay
+    # semantics are preserved; the extra experts/weights are recorded for
+    # downstream weighted aggregation.
+    route_mode: str = "argmax"
+    route_k: int = 2
+    route_temperature: float = 1.0
 
     experts: list[Expert] = field(init=False, default_factory=list)
     base_receipt: Receipt | None = field(init=False, default=None)
@@ -141,7 +267,25 @@ class AgenticYarqa:
         if not self.experts:
             self.sense()
         obs = np.asarray(observation_velocity, dtype=float)
-        cid, score = route(obs, self.experts)
+        topk_ids: list[int] = []
+        topk_weights: list[float] = []
+        if self.route_mode == "topk":
+            rk = route_topk(
+                obs, self.experts, k=self.route_k, temperature=self.route_temperature
+            )
+            # Top-1 drives the gate/score so gate + replay semantics are exactly
+            # those of the argmax router; the rest is recorded as routing detail.
+            cid = rk.top1
+            score = rk.scores[0] if rk.scores else -np.inf
+            topk_ids = rk.compartment_ids
+            topk_weights = rk.weights
+            note = (
+                f"sparse top-{len(topk_ids)} MoE-style flow routing (softmax "
+                "gating); integrity receipt, not a proof."
+            )
+        else:
+            cid, score = route(obs, self.experts)
+            note = "MoE-style flow routing; integrity receipt, not a proof."
         ctx = {
             "observation": obs,
             "route_score": score,
@@ -157,7 +301,10 @@ class AgenticYarqa:
             yarqa_receipt_digest=self.base_receipt.receipt_digest()
             if self.base_receipt
             else "",
-            notes="MoE-style flow routing; integrity receipt, not a proof.",
+            notes=note,
+            route_mode=self.route_mode,
+            topk_compartments=topk_ids,
+            topk_weights=topk_weights,
         )
         self.log.append(step)  # P1 shape: exactly one record per step, append-only
         return step
@@ -170,6 +317,9 @@ class AgenticYarqa:
             policy_gate=self.policy_gate,
             doctrine_gate=self.doctrine_gate,
             min_route_score=self.min_route_score,
+            route_mode=self.route_mode,
+            route_k=self.route_k,
+            route_temperature=self.route_temperature,
         )
         fresh.sense()
         return [fresh.step(o) for o in observations]
