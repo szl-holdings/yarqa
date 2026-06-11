@@ -8,11 +8,26 @@ Clean-room implementation by SZL Holdings, written from the published algorithm
 description only. Apache-2.0. See PROVENANCE.md.
 """
 
+__version__ = "0.2.0"
+
 from .core import (
     Mesh,
     compartmentalize,
     build_connection_map,
 )
+from .provenance import (
+    Receipt,
+    compartmentalize_with_receipt,
+    verify,
+    mesh_fingerprint,
+)
 
-__all__ = ["Mesh", "compartmentalize", "build_connection_map"]
-__version__ = "0.1.0"
+__all__ = [
+    "Mesh",
+    "compartmentalize",
+    "build_connection_map",
+    "Receipt",
+    "compartmentalize_with_receipt",
+    "verify",
+    "mesh_fingerprint",
+]

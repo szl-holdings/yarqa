@@ -41,6 +41,24 @@ report = compartment_summary(mesh, labels)             # counts, mean velocity, 
    the plane normal to the seed velocity).
 3. Repeat until every cell is assigned. Result: sequential plug-flow slices.
 
+## Verifiable provenance receipts (the SZL innovation)
+`yarqa` is, to our knowledge, the first plug-flow compartmentalizer that emits a
+**signed-ready, replayable provenance receipt** for every run — applying SZL's
+receipt discipline to CFD:
+```python
+from yarqa import compartmentalize_with_receipt, verify
+labels, receipt = compartmentalize_with_receipt(mesh, align_threshold=0.2)
+receipt.receipt_digest()      # 64-char SHA-256 — the bytes a signer/cosign would sign
+verify(mesh, receipt)["ok"]    # True — anyone with the mesh can reproduce + confirm
+```
+The receipt records input content-hashes, params, code version, and the result
+hash. A third party holding only the mesh + receipt can **deterministically
+replay** the run and confirm the published compartments are exactly what this
+code produces — tamper-evident on inputs, params, or results. Signing itself is
+left to the platform's existing key chain (Ed25519/cosign), so the module stays
+dependency-free. This is an **integrity / reproducibility** guarantee, NOT a
+formal proof of correctness.
+
 ## Provenance & honesty
 Clean-room implementation from a published algorithm description — no third-party
 (incl. AGPL) source copied. See [`PROVENANCE.md`](PROVENANCE.md). **`yarqa` is an
