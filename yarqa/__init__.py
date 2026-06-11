@@ -8,7 +8,7 @@ Clean-room implementation by SZL Holdings, written from the published algorithm
 description only. Apache-2.0. See PROVENANCE.md.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .core import (
     Mesh,
@@ -21,6 +21,7 @@ from .provenance import (
     verify,
     mesh_fingerprint,
 )
+from .agentic import AgenticYarqa, Expert, build_experts, route
 
 __all__ = [
     "Mesh",
@@ -30,4 +31,8 @@ __all__ = [
     "compartmentalize_with_receipt",
     "verify",
     "mesh_fingerprint",
+    "AgenticYarqa",
+    "Expert",
+    "build_experts",
+    "route",
 ]
