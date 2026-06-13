@@ -103,3 +103,39 @@ with a "proven" badge or fold it into the locked formula count.
 
 ---
 *SZL Holdings · Apache-2.0 · Doctrine v11.*
+
+## Signed provenance receipts (Sigstore keyless)
+
+Every `compartmentalize_with_receipt(...)` run yields a canonical, reproducible
+`Receipt`. In CI, that receipt is signed as a **genuine Sigstore keyless DSSE
+attestation** — a GitHub Actions OIDC token is exchanged at **Fulcio** for a
+short-lived ECDSA-P256 certificate, the receipt is wrapped as an in-toto v1
+Statement and DSSE-signed, and the signature is recorded in the public **Rekor**
+transparency log. No founder key, no stored secret.
+
+```bash
+# sign (requires a CI context with id-token: write; off-CI use --allow-placeholder)
+python scripts/sign_receipt.py --nx 12 --ny 8 --seed 0
+
+# independently verify the signature AND reproduce the run
+python scripts/verify_receipt.py attestations/yarqa/<digest>.dsse.json \
+  --identity "https://github.com/szl-holdings/yarqa/.github/workflows/receipt-sign.yml@refs/heads/master" \
+  --issuer "https://token.actions.githubusercontent.com" \
+  --replay
+```
+
+The signed statement embeds a deterministic **replay recipe** (`generator, nx,
+ny, seed, align_threshold`), so any third party can regenerate the mesh,
+reconstruct the receipt, and confirm via `yarqa.verify()` that the result
+reproduces — independent of any data we host.
+
+The `receipt-sign` workflow runs this on every push to `master` and publishes
+each signed receipt to the append-only `governance-receipts` branch
+(`receipts/<sha256>.dsse.json`).
+
+**Honesty:** this signs the receipt, nothing more. `yarqa` is an
+engineering-method / CFD tool — receipts attest **integrity + reproducibility**,
+never correctness, and carry no locked-theorem or "proven" claim. SLSA level is
+unchanged (**L1**). Outside CI there is no ambient identity, so `yarqa` declines
+to sign rather than fabricate a signature (an honest placeholder is emitted only
+with `--allow-placeholder`).
