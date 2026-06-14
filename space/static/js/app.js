@@ -7,10 +7,26 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
+/* Universal fetch hardening: every request carries an AbortController timeout so
+   a hung/slow endpoint can NEVER produce a perpetual spinner. On timeout or any
+   error the caller's catch fires and the panel honest-degrades to SAMPLE/
+   unreachable — never blank, never a forever-loading state. */
+const API_TIMEOUT_MS = 8000;
 async function api(path, opts) {
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(path + ' -> ' + r.status);
-  return r.json();
+  const o = Object.assign({}, opts);
+  let ctl = null, timer = null;
+  if (typeof AbortController !== 'undefined' && !o.signal) {
+    ctl = new AbortController();
+    o.signal = ctl.signal;
+    timer = setTimeout(() => { try { ctl.abort(); } catch (e) {} }, o.timeoutMs || API_TIMEOUT_MS);
+  }
+  try {
+    const r = await fetch(path, o);
+    if (!r.ok) throw new Error(path + ' -> ' + r.status);
+    return await r.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 function setBadge(el, state) {
   if (!el) return;
@@ -314,8 +330,19 @@ $('#refreshFeeds').addEventListener('click', () => Live.refresh(true));
 
 /* ===================== BOOT ===================== */
 window.addEventListener('DOMContentLoaded', async () => {
-  await health();
-  Flow.init();
-  await Flow.refresh();
-  $('#loader').classList.add('hidden');
+  // Guarantee the loader is dismissed no matter what: a hard watchdog hides it
+  // even if any boot step hangs past the fetch timeout, so the UI is never stuck
+  // behind a perpetual spinner. Each panel then carries its own LIVE/SAMPLE badge.
+  const hideLoader = () => { const l = $('#loader'); if (l) l.classList.add('hidden'); };
+  const watchdog = setTimeout(hideLoader, API_TIMEOUT_MS + 1500);
+  try {
+    await health();
+    Flow.init();
+    await Flow.refresh();
+  } catch (e) {
+    /* honest-degrade: panels already render SAMPLE/unreachable on their own */
+  } finally {
+    clearTimeout(watchdog);
+    hideLoader();
+  }
 });
