@@ -132,3 +132,34 @@ def test_vendored_three_is_r160_zero_cdn():
     idx = client.get("/").text
     assert "./lib/three.min.js" in idx
     assert "cdn" not in idx.lower()
+
+
+def test_security_headers_present():
+    # SAFE-NOW hardening (R2): real headers on every response, incl. /healthz.
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    h = r.headers
+    csp = h["content-security-policy"]
+    assert "default-src 'self'" in csp
+    assert "object-src 'none'" in csp
+    # frame-ancestors permits the legit HF embed but is not wide open
+    assert "frame-ancestors 'self' https://huggingface.co https://*.hf.space" in csp
+    assert h["x-content-type-options"] == "nosniff"
+    assert h["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert h["strict-transport-security"].startswith("max-age=")
+    # NOT X-Frame-Options: DENY (that would break the HF iframe embed)
+    assert h.get("x-frame-options", "").upper() != "DENY"
+
+
+def test_cors_not_wildcard_but_allows_hf_embed():
+    # An allowed cross-origin (an *.hf.space sibling) is echoed back...
+    r = client.get("/healthz", headers={"Origin": "https://szlholdings-a11oy.hf.space"})
+    aco = r.headers.get("access-control-allow-origin", "")
+    assert aco != "*"
+    assert aco == "https://szlholdings-a11oy.hf.space"
+    assert r.status_code == 200  # public read still served
+    # A random untrusted origin is NOT granted an ACAO header, but the read
+    # itself still succeeds (CORS only gates cross-site *browser* JS).
+    r2 = client.get("/healthz", headers={"Origin": "https://evil.example.com"})
+    assert r2.headers.get("access-control-allow-origin") in (None, "")
+    assert r2.status_code == 200

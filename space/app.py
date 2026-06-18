@@ -28,6 +28,7 @@ from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -54,6 +55,67 @@ from yarqa.core import compartment_summary  # noqa: E402
 import feeds as feeds_mod  # noqa: E402
 
 app = FastAPI(title="yarqa Space", version="0.4.0")
+
+# ---------------------------------------------------------------------------
+# SAFE-NOW hardening (R2) — real response headers on a real (FastAPI) server.
+# Unlike a pure static HF Space, here we CAN emit honest, browser-honored
+# headers, so we set the full set: CSP, HSTS, nosniff, Referrer-Policy, and an
+# enforced frame-ancestors that allows the legitimate HF embed but nothing else.
+# ---------------------------------------------------------------------------
+
+# CORS: restrict cross-origin *browser* access to the SZL/HF embed origins. This
+# does NOT block public reads — same-origin fetches and direct (curl/server)
+# GETs carry no Origin and are unaffected; only cross-site browser JS is gated,
+# and only to this allow-list (no '*'). Read-only methods, no credentials.
+_ALLOWED_ORIGINS = [
+    "https://huggingface.co",
+    "https://a11oy.net",
+    "https://www.a11oy.net",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://[a-z0-9-]+\.hf\.space",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+    max_age=600,
+)
+
+# CSP: scripts are all vendored same-origin files (no inline <script>), so
+# script-src stays 'self' with no 'unsafe-inline'. style-src keeps 'unsafe-inline'
+# because the app injects inline style="" attributes (e.g. compartment colors).
+# img-src allows the inline data: SVG favicon. connect-src is same-origin only
+# (the external ocean/wind feeds are fetched server-side, never from the browser).
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'self' https://huggingface.co https://*.hf.space"
+)
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": _CSP,
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "cross-origin",
+}
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    for k, v in _SECURITY_HEADERS.items():
+        resp.headers.setdefault(k, v)
+    return resp
+
 
 _CACHE = feeds_mod.FeedCache()
 STATIC_DIR = _HERE / "static"
