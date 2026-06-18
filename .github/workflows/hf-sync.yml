@@ -1,0 +1,76 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: Sync to HuggingFace Space
+
+# Mirrors this repo's Space source to the live Hugging Face Space
+# (SZLHOLDINGS/yarqa) on every push to the default branch, so the Space never
+# drifts behind GitHub. yarqa had no automated sync, so the live Space lagged
+# (e.g. #7 SAFE-NOW security headers + restricted CORS never reached the Space).
+#
+# It uploads the repo's Space payload — space/** + yarqa/** + pyproject.toml —
+# via huggingface_hub.upload_folder with an explicit allow-list. It deliberately
+# does NOT upload the repo root Dockerfile/README equivalents: the live Space
+# carries its OWN root Dockerfile + root README.md (the HF container scaffold,
+# which do not exist at this repo's root), and clobbering them would break the
+# Space build. The repo's space/Dockerfile + space/README.md ARE mirrored (they
+# live under space/, inside the allow-list).
+#
+# Requires repo secret HF_TOKEN (HF write token with org write to SZLHOLDINGS).
+# Without it the job FAILS LOUDLY — it never fakes a sync.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "space/**"
+      - "yarqa/**"
+      - "pyproject.toml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hf-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+      - name: Install huggingface_hub
+        run: pip install --quiet "huggingface_hub>=0.25"
+      - name: Mirror Space payload to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SPACE_ID: SZLHOLDINGS/yarqa
+        run: |
+          set -euo pipefail
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "::error::HF_TOKEN secret is not set — cannot sync the Space."
+            echo "::error::Founder action required: add repo secret HF_TOKEN (HF write token, org write to SZLHOLDINGS)."
+            exit 1
+          fi
+          python3 <<'PYEOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["SPACE_ID"]
+          commit = api.upload_folder(
+              repo_id=space, repo_type="space", folder_path=".",
+              commit_message=f"hf-sync: mirror Space payload from GitHub {os.environ.get('GITHUB_SHA','')[:8]}",
+              # Only the Space payload. The Space's OWN root Dockerfile + root
+              # README.md are NOT in this list, so they survive untouched.
+              allow_patterns=["space/**", "yarqa/**", "pyproject.toml"],
+              ignore_patterns=["**/__pycache__/**", "*.pyc", "**/.pytest_cache/**"],
+          )
+          print("Space commit:", getattr(commit, "commit_url", commit))
+          info = api.space_info(space)
+          print("Space sha:", info.sha, "runtime:",
+                getattr(getattr(info, "runtime", None), "stage", None))
+          PYEOF
