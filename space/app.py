@@ -69,8 +69,8 @@ app = FastAPI(title="yarqa Space", version="0.4.0")
 # and only to this allow-list (no '*'). Read-only methods, no credentials.
 _ALLOWED_ORIGINS = [
     "https://huggingface.co",
-    "https://a11oy.net",
-    "https://www.a11oy.net",
+    "https://a-11-oy.com",
+    "https://www.a-11-oy.com",
 ]
 app.add_middleware(
     CORSMiddleware,
