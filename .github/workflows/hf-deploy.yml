@@ -1,0 +1,47 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: Deploy to HuggingFace Space
+
+# Thin caller for the canonical org deployer, replacing the hand-rolled
+# upload_folder hf-sync.yml. The file set pushed to the live Space
+# (SZLHOLDINGS/yarqa) is DERIVED from the Space build Dockerfile's per-file/dir
+# COPY sources (pyproject.toml + yarqa/ + space/), then attested live-vs-git
+# (sha256) after the Space rebuilds. This derives the exact same payload the old
+# allow-list sync mirrored, with no hand-maintained list to drift.
+#
+# dockerfile-path = space/Dockerfile: this repo has NO root Dockerfile. The live
+# Space's build Dockerfile lives at the SPACE root and is byte-identical to this
+# repo's space/Dockerfile, whose COPY sources (pyproject.toml, yarqa, space)
+# resolve against the repo root. include-readme = false: the repo root README is
+# the GitHub project card (no HF front-matter); the Space's own front-matter card
+# README lives only on the Space and must not be clobbered (matches the prior
+# sync, which never touched it).
+#
+# DEPENDS ON szl-holdings/.github#172 — `reusable-hf-deploy.yml@main` only
+# resolves once that PR merges to .github main.
+#
+# Requires org/repo secret HF_TOKEN (HF write token, org write to SZLHOLDINGS),
+# passed via `secrets: inherit`. The deployer FAILS LOUDLY if it is absent.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "space/**"
+      - "yarqa/**"
+      - "pyproject.toml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hf-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@main
+    secrets: inherit
+    with:
+      dockerfile-path: space/Dockerfile
+      include-readme: false
