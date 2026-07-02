@@ -8,7 +8,7 @@ Clean-room implementation by SZL Holdings, written from the published algorithm
 description only. Apache-2.0. See PROVENANCE.md.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from .core import (
     Mesh,
@@ -36,6 +36,23 @@ from .meshio import (
     sample_channel_mesh,
     try_load_openfoam,
 )
+from .surrogate import (
+    PlugFlowSurrogate,
+    SurrogateAnchor,
+    SurrogatePrediction,
+    fit_plugflow_surrogate,
+    SURROGATE_SCHEMA,
+    SURROGATE_METHOD,
+    STATUS_PREDICTED,
+    STATUS_UNAVAILABLE,
+)
+from .attestation import (
+    AttestationUnavailable,
+    attest_prediction,
+    verify_prediction_attestation,
+    prediction_receipt,
+    prediction_digest,
+)
 
 __all__ = [
     "Mesh",
@@ -58,4 +75,17 @@ __all__ = [
     "save_npz_mesh",
     "sample_channel_mesh",
     "try_load_openfoam",
+    "PlugFlowSurrogate",
+    "SurrogateAnchor",
+    "SurrogatePrediction",
+    "fit_plugflow_surrogate",
+    "SURROGATE_SCHEMA",
+    "SURROGATE_METHOD",
+    "STATUS_PREDICTED",
+    "STATUS_UNAVAILABLE",
+    "AttestationUnavailable",
+    "attest_prediction",
+    "verify_prediction_attestation",
+    "prediction_receipt",
+    "prediction_digest",
 ]
