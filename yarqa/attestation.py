@@ -33,6 +33,18 @@ PREDICATE_TYPE = "https://a-11-oy.com/attest/yarqa-surrogate/v1"
 BUILD_TYPE = "https://a-11-oy.com/attest/yarqa-plugflow-surrogate"
 SUBJECT_NAME = "yarqa-surrogate-prediction"
 
+# --- PCGI spine (T201): one signed szl-receipt per surrogate prediction --------
+# The receipt binds the canonical PCGI tuple: model id + input digest + output
+# digest + governing policy id + energy (honest UNAVAILABLE, never fabricated) +
+# optional BFT witnesses, all under a single DSSE/ECDSA-P256 signature via the
+# shared ``szl_receipt.sign_receipt``. It is EVIDENCE binding the decision, never
+# a proof the prediction is correct.
+PCGI_RECEIPT_SCHEMA = "szl.pcgi.receipt/yarqa-surrogate/v1"
+MODEL_ID = "yarqa-plugflow-surrogate"
+DEFAULT_POLICY_ID = "szl.pcgi.policy/yarqa-surrogate-bounded-honest/v1"
+DEFAULT_ORGAN = "yarqa"
+ENERGY_UNAVAILABLE = "UNAVAILABLE"
+
 # The capabilities the surrogate + its provenance record honestly provide.
 # ``energy`` is deliberately False -> reported UNAVAILABLE by the shared lib.
 _CAPABILITIES = {
@@ -171,3 +183,198 @@ def verify_prediction_attestation(
         expected_digest=expected,
         predicate_type=attestation.get("predicate_type", PREDICATE_TYPE),
     )
+
+
+# --- PCGI spine: one signed receipt per prediction (T201) ----------------------
+
+
+def _digest(body: dict[str, Any]) -> str:
+    """SHA-256 hex over the shared canonical JSON of ``body``.
+
+    Uses ``szl_receipt.Receipt.digest`` (SHA-256 over the library's canonical
+    JSON) so the digest is byte-for-byte the same primitive that binds every
+    other SZL receipt — nothing is re-implemented here.
+    """
+    szl_receipt, _ = _require_szl_receipt()
+    return szl_receipt.Receipt(kind="_digest", body=dict(body)).digest()
+
+
+def prediction_input(prediction: SurrogatePrediction) -> dict[str, Any]:
+    """The canonical INPUT that determines a prediction (digested into a receipt).
+
+    Binds everything the estimate depends on: the surrogate identity, the mesh
+    fingerprint, the VERBATIM measured anchors, the validated range, and the
+    query threshold. Deriving this independently reproduces ``input_digest``.
+    """
+    prov = prediction.provenance
+    return {
+        "schema": prov.get("schema"),
+        "method": prov.get("method"),
+        "yarqa_version": prov.get("yarqa_version"),
+        "target": prov.get("target"),
+        "control": prov.get("control"),
+        "physics_prior": prov.get("physics_prior"),
+        "n_cells": prov.get("n_cells"),
+        "mesh_fingerprint": prov.get("mesh_fingerprint"),
+        "anchors": prov.get("anchors"),
+        "validated_range": prov.get("validated_range"),
+        "query": prov.get("query"),
+    }
+
+
+def prediction_output(prediction: SurrogatePrediction) -> dict[str, Any]:
+    """The canonical OUTPUT of a prediction (the honest result record)."""
+    return dict(prediction.provenance.get("result", {}))
+
+
+def prediction_input_digest(prediction: SurrogatePrediction) -> str:
+    """SHA-256 hex over :func:`prediction_input`."""
+    return _digest(prediction_input(prediction))
+
+
+def prediction_output_digest(prediction: SurrogatePrediction) -> str:
+    """SHA-256 hex over :func:`prediction_output`."""
+    return _digest(prediction_output(prediction))
+
+
+def build_prediction_receipt_body(
+    prediction: SurrogatePrediction,
+    *,
+    policy_id: str = DEFAULT_POLICY_ID,
+    witnesses: Optional[list[Any]] = None,
+) -> dict[str, Any]:
+    """Assemble the canonical PCGI receipt body for one prediction.
+
+    Binds the spine tuple — model id, input digest, output digest, governing
+    policy id, energy (honest ``UNAVAILABLE`` — yarqa measures no joules here),
+    and optional BFT witnesses. The body is deterministic for a fixed prediction
+    (no timestamps / nonces), so the same prediction always yields byte-identical
+    canonical JSON and the same receipt digest.
+    """
+    prov = prediction.provenance
+    return {
+        "schema": PCGI_RECEIPT_SCHEMA,
+        "kind": RECEIPT_KIND,
+        "model_id": MODEL_ID,
+        "yarqa_version": prov.get("yarqa_version"),
+        "method": prov.get("method"),
+        "input_digest": prediction_input_digest(prediction),
+        "output_digest": prediction_output_digest(prediction),
+        "policy_id": policy_id,
+        "energy": {
+            "status": ENERGY_UNAVAILABLE,
+            "joules": None,
+            "reason": (
+                "yarqa surrogate inference energy is NOT measured here; reported "
+                "UNAVAILABLE, never fabricated."
+            ),
+        },
+        "witnesses": list(witnesses or []),
+        "prediction": {
+            "align_threshold": prediction.align_threshold,
+            "status": prediction.status,
+            "available": prediction.available,
+            "value_int": prediction.value_int,
+            "lower_bound": prediction.lower_bound,
+            "upper_bound": prediction.upper_bound,
+        },
+        "honesty": {
+            "tier": "engineering-method-cfd",
+            "interval": (
+                "indicative — EXPECTED, not guaranteed, to contain truth; EXACT + "
+                "zero-width only at a measured anchor; UNAVAILABLE outside range"
+            ),
+            "asserts": "integrity/reproducibility, NOT correctness",
+            "receipt_is": (
+                "evidence trail binding this decision (model+input+output+policy+"
+                "energy), NOT a proof the prediction is correct"
+            ),
+            "bounded": True,
+            "extrapolates": False,
+        },
+    }
+
+
+def prediction_receipt_body_digest(
+    prediction: SurrogatePrediction,
+    *,
+    policy_id: str = DEFAULT_POLICY_ID,
+    witnesses: Optional[list[Any]] = None,
+) -> str:
+    """Independently (re-)derive the signed receipt's content digest."""
+    return _digest(
+        build_prediction_receipt_body(
+            prediction, policy_id=policy_id, witnesses=witnesses
+        )
+    )
+
+
+def emit_prediction_receipt(
+    prediction: SurrogatePrediction,
+    *,
+    private_key_pem: Optional[str | bytes] = None,
+    policy_id: str = DEFAULT_POLICY_ID,
+    organ: str = DEFAULT_ORGAN,
+    keyid: str = "",
+    witnesses: Optional[list[Any]] = None,
+) -> dict[str, Any]:
+    """Emit ONE signed szl-receipt for a surrogate prediction (the PCGI spine).
+
+    Wraps :func:`build_prediction_receipt_body` in a shared
+    :class:`szl_receipt.Receipt` and signs it via
+    :func:`szl_receipt.sign_receipt` (DSSE/ECDSA-P256-SHA256, cosign-compatible).
+
+    When ``private_key_pem`` is ``None``/empty the shared library returns an
+    UNSIGNED-honest envelope (``signed=False``) — never a fabricated signature.
+
+    The returned DSSE envelope binds model id + input digest + output digest +
+    governing policy id + honest ``UNAVAILABLE`` energy. It is an EVIDENCE trail
+    for the decision, not a proof the prediction is correct; a prediction outside
+    the validated range (``status=UNAVAILABLE``, ``value_int=None``) still emits a
+    fully honest receipt.
+    """
+    szl_receipt, _ = _require_szl_receipt()
+    body = build_prediction_receipt_body(
+        prediction, policy_id=policy_id, witnesses=witnesses
+    )
+    receipt = szl_receipt.Receipt(kind=RECEIPT_KIND, body=body)
+    return szl_receipt.sign_receipt(
+        receipt, private_key_pem, organ=organ, keyid=keyid
+    )
+
+
+def verify_prediction_receipt(
+    envelope: dict[str, Any],
+    *,
+    public_key_pem: Optional[str | bytes] = None,
+    prediction: Optional[SurrogatePrediction] = None,
+    policy_id: str = DEFAULT_POLICY_ID,
+    witnesses: Optional[list[Any]] = None,
+) -> tuple[bool, str]:
+    """Verify a signed prediction receipt (and optionally rebind it).
+
+    Delegates the cryptographic check to :func:`szl_receipt.verify_receipt`
+    (keyless envelopes honestly return ``(False, "unsigned-honest")``). When
+    ``prediction`` is supplied, additionally confirms the signed body's
+    ``input_digest`` / ``output_digest`` re-derive from that prediction — so any
+    post-hoc edit to the prediction flips a digest and fails the rebind.
+    """
+    szl_receipt, _ = _require_szl_receipt()
+    ok, detail = szl_receipt.verify_receipt(envelope, public_key_pem=public_key_pem)
+    if not ok:
+        return ok, detail
+
+    if prediction is not None:
+        import base64
+        import json
+
+        try:
+            body = json.loads(base64.b64decode(envelope["payload"]).decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return False, f"payload decode error: {exc}"
+        if body.get("input_digest") != prediction_input_digest(prediction):
+            return False, "input-digest-rebind-mismatch"
+        if body.get("output_digest") != prediction_output_digest(prediction):
+            return False, "output-digest-rebind-mismatch"
+
+    return True, "ok"
