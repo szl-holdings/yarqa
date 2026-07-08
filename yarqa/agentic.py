@@ -63,18 +63,23 @@ def _cosine_scores(observation_velocity: np.ndarray, experts: list[Expert]) -> n
     """Cosine alignment of the observation with every expert's mean flow.
 
     Returns a (len(experts),) array of scores in [-1, 1]. A score of 0.0 is
-    used whenever either vector is (numerically) zero, so the gate stays honest
-    about "no information" rather than fabricating an alignment.
+    used whenever either vector is (numerically) zero **or non-finite**
+    (containing NaN / +-Inf), so the gate stays honest about "no information"
+    rather than fabricating an alignment. Failing closed on non-finite inputs
+    also keeps a NaN from leaking into ``argmax`` / softmax and silently
+    corrupting the route (and its gate decision) downstream.
     """
     o = np.asarray(observation_velocity, dtype=float)
     on = float(np.linalg.norm(o))
+    o_finite = bool(np.all(np.isfinite(o)))
     scores = np.zeros(len(experts), dtype=float)
     for i, e in enumerate(experts):
-        en = float(np.linalg.norm(e.mean_velocity))
-        if on < 1e-12 or en < 1e-12:
+        m = np.asarray(e.mean_velocity, dtype=float)
+        en = float(np.linalg.norm(m))
+        if not o_finite or not np.all(np.isfinite(m)) or on < 1e-12 or en < 1e-12:
             scores[i] = 0.0
         else:
-            scores[i] = float(np.dot(o, e.mean_velocity) / (on * en))
+            scores[i] = float(np.dot(o, m) / (on * en))
     return scores
 
 
@@ -204,8 +209,12 @@ def _default_policy_gate(ctx: dict) -> bool:
 
 
 def _default_doctrine_gate(ctx: dict) -> bool:
-    # Honest default: never act on an empty/zero observation (no fabricated act).
-    return bool(np.linalg.norm(ctx.get("observation", np.zeros(1))) > 0.0)
+    # Honest default: only act on a real, finite, non-zero observation. A
+    # non-finite (NaN / +-Inf) or empty/zero observation is not an actionable
+    # measurement, so the gate fails closed (DENY). Note +Inf has a positive
+    # norm, so the finiteness check is what actually blocks it.
+    obs = np.asarray(ctx.get("observation", np.zeros(1)), dtype=float)
+    return bool(np.all(np.isfinite(obs)) and np.linalg.norm(obs) > 0.0)
 
 
 @dataclass

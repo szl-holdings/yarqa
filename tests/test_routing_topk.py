@@ -6,6 +6,7 @@ Concept inspiration only: sparsely-gated top-k MoE (Shazeer et al., 2017). All
 code under test is original SZL work; experts here are physical compartments.
 """
 import numpy as np
+import pytest
 
 from yarqa import Mesh
 from yarqa.agentic import (
@@ -14,6 +15,7 @@ from yarqa.agentic import (
     build_experts,
     route,
     route_topk,
+    _cosine_scores,
     _softmax,
 )
 
@@ -158,3 +160,77 @@ def test_agent_topk_deterministic_replay():
         for s in agent.replay(obs)
     ]
     assert first == replayed
+
+
+# --- adversarial: non-finite (NaN / +-Inf) routing inputs must fail closed ---
+# A malformed query vector must never fabricate an alignment or leak a NaN into
+# argmax/softmax; the scorer treats it as "no information" (score 0.0) and the
+# doctrine gate denies action on a non-finite observation.
+
+@pytest.mark.parametrize(
+    "obs",
+    [
+        np.array([np.nan, 0.3]),
+        np.array([np.inf, 0.0]),
+        np.array([-np.inf, 1.0]),
+        np.array([np.nan, np.inf]),
+    ],
+)
+def test_cosine_scores_finite_and_zero_for_nonfinite_observation(obs):
+    experts = _make_experts()
+    scores = _cosine_scores(obs, experts)
+    assert np.all(np.isfinite(scores))          # no NaN/Inf leaks out
+    assert np.allclose(scores, 0.0)             # honest "no information"
+
+
+def test_cosine_scores_ignores_nonfinite_expert_but_keeps_finite_ones():
+    # A single corrupt expert mean must not poison the others' scores.
+    experts = [
+        Expert(0, np.array([np.nan, 0.0]), np.array([0.0, 0.0]), 4),
+        Expert(1, np.array([1.0, 0.0]), np.array([1.0, 0.0]), 4),
+    ]
+    scores = _cosine_scores(np.array([1.0, 0.0]), experts)
+    assert np.all(np.isfinite(scores))
+    assert scores[0] == 0.0                     # corrupt expert -> no information
+    assert abs(scores[1] - 1.0) < 1e-12         # healthy expert unaffected
+
+
+@pytest.mark.parametrize("obs", [np.array([np.nan, 0.3]), np.array([np.inf, 0.0])])
+def test_route_nonfinite_observation_returns_finite_score(obs):
+    experts = _make_experts()
+    cid, score = route(obs, experts)
+    assert np.isfinite(score)                   # never returns a NaN score
+    assert score == 0.0
+    assert cid in {e.compartment_id for e in experts}
+
+
+@pytest.mark.parametrize("obs", [np.array([np.nan, 0.3]), np.array([np.inf, 0.0])])
+def test_topk_nonfinite_observation_weights_stay_valid(obs):
+    experts = _make_experts()
+    rk = route_topk(obs, experts, k=2)
+    assert all(np.isfinite(w) for w in rk.weights)
+    assert abs(sum(rk.weights) - 1.0) < 1e-12   # still a valid distribution
+    assert all(np.isfinite(s) for s in rk.scores)
+
+
+@pytest.mark.parametrize(
+    "obs",
+    [np.array([np.nan, 0.0]), np.array([np.inf, 0.0]), np.array([1.0, -np.inf])],
+)
+def test_agent_denies_nonfinite_observation(obs):
+    # +Inf has a positive norm, so the OLD norm>0 gate would have ALLOWED it;
+    # the finiteness check is what makes the two-key gate fail closed.
+    mesh = _grid(10, 6, _two_stream)
+    agent = AgenticYarqa(mesh, align_threshold=0.3)
+    step = agent.step(obs)
+    assert step.decision == "DENY"
+
+
+def test_scoring_emits_no_runtime_warning_on_nonfinite():
+    import warnings
+    experts = _make_experts()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        # would previously raise "invalid value encountered in divide"
+        _cosine_scores(np.array([np.inf, 0.0]), experts)
+        route_topk(np.array([np.nan, 1.0]), experts, k=3)
