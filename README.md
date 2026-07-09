@@ -141,3 +141,7 @@ never correctness, and carry no locked-theorem or "proven" claim. SLSA level is
 unchanged (**L1**). Outside CI there is no ambient identity, so `yarqa` declines
 to sign rather than fabricate a signature (an honest placeholder is emitted only
 with `--allow-placeholder`).
+
+---
+
+**Explore the SZL estate:** [a11oy console](https://a-11-oy.com) · [LLM Router](https://github.com/szl-holdings/szl-router) · [Receipt format spec](https://github.com/szl-holdings/governed-receipt-spec) · [Lean proofs](https://github.com/szl-holdings/lutar-lean) · [Docs](https://github.com/szl-holdings/docs-site) · [🤗 SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS)
