@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # actions/checkout@v4.1.7
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       # actions/setup-python@v5.1.1
-      - uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.11"
       - name: Install
