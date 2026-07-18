@@ -33,3 +33,59 @@ jobs:
         run: |
           grep -q "REVISION = '160'" space/static/lib/three.min.js
           ! grep -riE "https?://(cdn|unpkg|cdnjs|jsdelivr|esm\.sh)" space/static/index.html space/static/js
+
+  container-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Build the exact pinned Space image
+        run: docker build --pull -f space/Dockerfile -t yarqa-space-pr:${{ github.sha }} .
+      - name: Exercise non-root runtime, health contract, and unknown-route 404
+        env:
+          IMAGE: yarqa-space-pr:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          name="yarqa-space-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run --rm -d --name "$name" -p 7860:7860 "$IMAGE"
+          test "$(docker exec "$name" id -u)" -ne 0
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          health = "http://127.0.0.1:7860/healthz"
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen(health, timeout=3) as response:
+                      body = json.load(response)
+                  if body.get("ok") is True and body.get("service") == "yarqa-space":
+                      break
+              except (OSError, ValueError):
+                  pass
+              time.sleep(1)
+          else:
+              raise SystemExit("/healthz did not satisfy the Yarqa contract")
+
+          try:
+              urllib.request.urlopen("http://127.0.0.1:7860/definitely-missing", timeout=3)
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+          else:
+              raise SystemExit("unknown route did not return 404")
+          PY
+          for _ in $(seq 1 45); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' "$name")"
+            if [ "$status" = healthy ]; then
+              break
+            fi
+            if [ "$status" = unhealthy ]; then
+              docker logs "$name"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$name")" = healthy
