@@ -140,6 +140,17 @@ def _mesh_from_field(field: dict) -> Mesh:
 # ---------------------------------------------------------------------------
 # health: source of truth
 # ---------------------------------------------------------------------------
+@app.get("/livez")
+def livez() -> JSONResponse:
+    """Local process liveness with no network or feed dependency."""
+    return JSONResponse({
+        "ok": True,
+        "service": "yarqa-space",
+        "check": "liveness",
+        "yarqa_version": yarqa.__version__,
+    })
+
+
 @app.get("/healthz")
 def healthz() -> JSONResponse:
     fr = _CACHE.get()

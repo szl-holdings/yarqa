@@ -36,38 +36,79 @@ jobs:
 
   container-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-      - name: Build the exact pinned Space image
-        run: docker build --pull -f space/Dockerfile -t yarqa-space-pr:${{ github.sha }} .
-      - name: Exercise non-root runtime, health contract, and unknown-route 404
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Build the digest-pinned and dependency-locked Space image
+        run: docker build --pull -f space/Dockerfile -t yarqa-space-pr:${SOURCE_SHA} .
+      - name: Exercise HF UID, offline liveness, health contract, and unknown-route 404
         env:
-          IMAGE: yarqa-space-pr:${{ github.sha }}
+          IMAGE: yarqa-space-pr:${{ env.SOURCE_SHA }}
         run: |
           set -euo pipefail
           name="yarqa-space-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
+          offline="${name}-offline"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              docker logs "$name" 2>/dev/null || true
+              docker logs "$offline" 2>/dev/null || true
+            fi
+            docker rm -f "$name" "$offline" >/dev/null 2>&1 || true
+            exit "$status"
+          }
           trap cleanup EXIT
+
+          docker run --rm -d --network none --name "$offline" "$IMAGE"
+          test "$(docker exec "$offline" id -u)" = 1000
+          docker exec -i "$offline" python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:7860/livez", timeout=2) as response:
+                      body = json.load(response)
+                  if body.get("ok") is True and body.get("check") == "liveness":
+                      break
+              except (OSError, ValueError):
+                  time.sleep(1)
+          else:
+              raise SystemExit("offline /livez did not satisfy the liveness contract")
+          PY
+
           docker run --rm -d --name "$name" -p 7860:7860 "$IMAGE"
-          test "$(docker exec "$name" id -u)" -ne 0
+          test "$(docker exec "$name" id -u)" = 1000
           python - <<'PY'
           import json
           import time
           import urllib.error
           import urllib.request
 
-          health = "http://127.0.0.1:7860/healthz"
-          for _ in range(60):
+          liveness = "http://127.0.0.1:7860/livez"
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
               try:
-                  with urllib.request.urlopen(health, timeout=3) as response:
+                  with urllib.request.urlopen(liveness, timeout=2) as response:
                       body = json.load(response)
-                  if body.get("ok") is True and body.get("service") == "yarqa-space":
+                  if body.get("ok") is True and body.get("check") == "liveness":
                       break
               except (OSError, ValueError):
-                  pass
-              time.sleep(1)
+                  time.sleep(1)
           else:
-              raise SystemExit("/healthz did not satisfy the Yarqa contract")
+              raise SystemExit("/livez did not satisfy the Yarqa contract")
+
+          with urllib.request.urlopen("http://127.0.0.1:7860/healthz", timeout=45) as response:
+              health = json.load(response)
+          if health.get("ok") is not True or health.get("service") != "yarqa-space":
+              raise SystemExit("/healthz did not satisfy the source-of-truth contract")
 
           try:
               urllib.request.urlopen("http://127.0.0.1:7860/definitely-missing", timeout=3)
