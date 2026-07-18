@@ -79,7 +79,8 @@ jobs:
                   if body.get("ok") is True and body.get("check") == "liveness":
                       break
               except (OSError, ValueError):
-                  time.sleep(1)
+                  pass
+              time.sleep(1)
           else:
               raise SystemExit("offline /livez did not satisfy the liveness contract")
           PY
@@ -101,7 +102,8 @@ jobs:
                   if body.get("ok") is True and body.get("check") == "liveness":
                       break
               except (OSError, ValueError):
-                  time.sleep(1)
+                  pass
+              time.sleep(1)
           else:
               raise SystemExit("/livez did not satisfy the Yarqa contract")
 

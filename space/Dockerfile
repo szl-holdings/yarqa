@@ -18,5 +18,5 @@ EXPOSE 7860
 WORKDIR /app/space
 USER yarqa
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
-    CMD python -c "import json,urllib.request; body=json.load(urllib.request.urlopen('http://127.0.0.1:7860/livez', timeout=3)); assert body.get('ok') is True and body.get('service') == 'yarqa-space' and body.get('check') == 'liveness' and body.get('yarqa_version')"
+    CMD python -c "import json,sys,urllib.request; body=json.load(urllib.request.urlopen('http://127.0.0.1:7860/livez', timeout=3)); sys.exit(0 if body.get('ok') is True and body.get('service') == 'yarqa-space' and body.get('check') == 'liveness' and body.get('yarqa_version') else 1)"
 CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
