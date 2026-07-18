@@ -1,6 +1,6 @@
 # Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
 # yarqa Space — FastAPI + sovereign static app (vendored THREE r160, zero CDN).
-FROM python:3.11-slim
+FROM public.ecr.aws/docker/library/python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 PORT=7860
 WORKDIR /app
