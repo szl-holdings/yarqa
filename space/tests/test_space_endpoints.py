@@ -24,6 +24,21 @@ client = TestClient(space_app.app)
 VALID_STATES = {"LIVE", "SAMPLE"}
 
 
+def test_livez_is_local_only(monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("/livez must not resolve external feeds")
+
+    monkeypatch.setattr(space_app._CACHE, "get", fail_if_called)
+    r = client.get("/livez")
+    assert r.status_code == 200
+    assert r.json() == {
+        "ok": True,
+        "service": "yarqa-space",
+        "check": "liveness",
+        "yarqa_version": space_app.yarqa.__version__,
+    }
+
+
 def test_healthz_source_of_truth():
     r = client.get("/healthz")
     assert r.status_code == 200
