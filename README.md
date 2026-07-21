@@ -121,7 +121,7 @@ python scripts/sign_receipt.py --nx 12 --ny 8 --seed 0
 
 # independently verify the signature AND reproduce the run
 python scripts/verify_receipt.py attestations/yarqa/<digest>.dsse.json \
-  --identity "https://github.com/szl-holdings/yarqa/.github/workflows/receipt-sign.yml@refs/heads/master" \
+  --identity "https://github.com/szl-holdings/yarqa/.github/workflows/receipt-sign.yml@refs/heads/main" \
   --issuer "https://token.actions.githubusercontent.com" \
   --replay
 ```
@@ -131,7 +131,7 @@ ny, seed, align_threshold`), so any third party can regenerate the mesh,
 reconstruct the receipt, and confirm via `yarqa.verify()` that the result
 reproduces — independent of any data we host.
 
-The `receipt-sign` workflow runs this on every push to `master` and publishes
+The `receipt-sign` workflow runs this on every push to the default branch (`main`) and publishes
 each signed receipt to the append-only `governance-receipts` branch
 (`receipts/<sha256>.dsse.json`).
 

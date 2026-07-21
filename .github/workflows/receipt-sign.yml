@@ -19,7 +19,7 @@ name: Receipt Sign (Sigstore keyless)
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
     paths:
       - "yarqa/**"
       - "scripts/sign_receipt.py"
@@ -27,7 +27,7 @@ on:
       - "tests/test_signing.py"
       - ".github/workflows/receipt-sign.yml"
   pull_request:
-    branches: [master]
+    branches: [main, master]
     paths:
       - "yarqa/**"
       - "scripts/sign_receipt.py"
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write   # publish the signed receipt to the ledger branch (push:master only)
+      contents: write   # publish the signed receipt to the ledger branch (push to default branch only)
       id-token: write   # REQUIRED: the ambient OIDC token Fulcio exchanges for a cert
     steps:
       - name: Checkout
@@ -94,7 +94,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish signed receipt to ledger branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
