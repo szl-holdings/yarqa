@@ -38,7 +38,19 @@ def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch):
     }
 
 
-@pytest.mark.parametrize("revision", ["", "not-a-sha", "A" * 40, "f" * 39])
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "",
+        "not-a-sha",
+        "A" * 40,
+        "f" * 39,
+        "f" * 41,
+        " " + "f" * 40,
+        "f" * 40 + "\n",
+        "\t" + "f" * 40,
+    ],
+)
 def test_build_info_fails_closed_without_an_exact_revision(monkeypatch, revision):
     monkeypatch.setenv("SZL_GIT_SHA", revision)
 
@@ -47,6 +59,17 @@ def test_build_info_fails_closed_without_an_exact_revision(monkeypatch, revision
     assert r.status_code == 200
     assert r.json()["build"] == {"state": "UNAVAILABLE", "revision": None}
     assert r.json()["receipt_minted"] is False
+
+
+def test_build_info_has_source_identity_security_headers(monkeypatch):
+    monkeypatch.setenv("SZL_GIT_SHA", "b" * 40)
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    assert "default-src 'self'" in r.headers["content-security-policy"]
+    assert r.headers["x-content-type-options"] == "nosniff"
 
 
 def test_livez_is_local_only(monkeypatch):

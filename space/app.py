@@ -131,7 +131,7 @@ _SOURCE_REVISION_ENV = "SZL_GIT_SHA"
 
 def _build_identity() -> dict[str, str | None]:
     """Return a source identity only when the governed revision is exact."""
-    revision = os.environ.get(_SOURCE_REVISION_ENV, "").strip()
+    revision = os.environ.get(_SOURCE_REVISION_ENV, "")
     is_exact_sha = len(revision) == 40 and all(
         character in "0123456789abcdef" for character in revision
     )
@@ -158,11 +158,13 @@ def _mesh_from_field(field: dict) -> Mesh:
 @app.get("/api/build-info")
 def api_build_info() -> JSONResponse:
     """Expose the exact protected source revision bound by the publisher."""
-    return JSONResponse({
+    response = JSONResponse({
         "service": "yarqa-space",
         "build": _build_identity(),
         "receipt_minted": False,
     })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/livez")

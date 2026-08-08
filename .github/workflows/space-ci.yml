@@ -83,12 +83,23 @@ jobs:
               time.sleep(1)
           else:
               raise SystemExit("offline /livez did not satisfy the liveness contract")
+
+          with urllib.request.urlopen("http://127.0.0.1:7860/api/build-info", timeout=3) as response:
+              build_info = json.load(response)
+          if build_info != {
+              "service": "yarqa-space",
+              "build": {"state": "UNAVAILABLE", "revision": None},
+              "receipt_minted": False,
+          }:
+              raise SystemExit("unbound image did not fail closed at /api/build-info")
           PY
 
-          docker run --rm -d --name "$name" -p 7860:7860 "$IMAGE"
+          docker run --rm -d --name "$name" -p 7860:7860 \
+            -e SZL_GIT_SHA="$SOURCE_SHA" "$IMAGE"
           test "$(docker exec "$name" id -u)" = 1000
           python - <<'PY'
           import json
+          import os
           import time
           import urllib.error
           import urllib.request
@@ -111,6 +122,19 @@ jobs:
               health = json.load(response)
           if health.get("ok") is not True or health.get("service") != "yarqa-space":
               raise SystemExit("/healthz did not satisfy the source-of-truth contract")
+
+          with urllib.request.urlopen("http://127.0.0.1:7860/api/build-info", timeout=3) as response:
+              build_info = json.load(response)
+              cache_control = response.headers.get("Cache-Control")
+              content_type_options = response.headers.get("X-Content-Type-Options")
+          if build_info != {
+              "service": "yarqa-space",
+              "build": {"state": "OBSERVED", "revision": os.environ["SOURCE_SHA"]},
+              "receipt_minted": False,
+          }:
+              raise SystemExit("bound image did not expose the exact source revision")
+          if cache_control != "no-store" or content_type_options != "nosniff":
+              raise SystemExit("/api/build-info lacks required response hardening")
 
           try:
               urllib.request.urlopen("http://127.0.0.1:7860/definitely-missing", timeout=3)
