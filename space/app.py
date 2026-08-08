@@ -10,6 +10,7 @@ Architecture (doctrine v11 honest):
     on REAL reachability of license-clean public feeds (see feeds.py).
 
 Endpoints:
+  GET /api/build-info             — exact protected GitHub source identity
   GET /healthz                  — source-of-truth health + feed states
   GET /api/compartments         — 3D field from live/sample feeds + receipt
   GET /api/agentic              — one sense->route->gate->receipt loop, AgentSteps
@@ -125,6 +126,20 @@ CLAIM_TIER = (
     "Lambda=Conjecture 1; Khipu=Conjecture 2; SLSA L1"
 )
 
+_SOURCE_REVISION_ENV = "SZL_GIT_SHA"
+
+
+def _build_identity() -> dict[str, str | None]:
+    """Return a source identity only when the governed revision is exact."""
+    revision = os.environ.get(_SOURCE_REVISION_ENV, "").strip().lower()
+    is_exact_sha = len(revision) == 40 and all(
+        character in "0123456789abcdef" for character in revision
+    )
+    return {
+        "state": "OBSERVED" if is_exact_sha else "UNAVAILABLE",
+        "revision": revision if is_exact_sha else None,
+    }
+
 
 def _mesh_from_field(field: dict) -> Mesh:
     flat = np.asarray(field["neighbors_flat"], dtype=int)
@@ -140,6 +155,16 @@ def _mesh_from_field(field: dict) -> Mesh:
 # ---------------------------------------------------------------------------
 # health: source of truth
 # ---------------------------------------------------------------------------
+@app.get("/api/build-info")
+def api_build_info() -> JSONResponse:
+    """Expose the exact protected source revision bound by the publisher."""
+    return JSONResponse({
+        "service": "yarqa-space",
+        "build": _build_identity(),
+        "receipt_minted": False,
+    })
+
+
 @app.get("/livez")
 def livez() -> JSONResponse:
     """Local process liveness with no network or feed dependency."""

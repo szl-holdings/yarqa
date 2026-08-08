@@ -24,6 +24,31 @@ client = TestClient(space_app.app)
 VALID_STATES = {"LIVE", "SAMPLE"}
 
 
+def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch):
+    revision = "a" * 40
+    monkeypatch.setenv("SZL_GIT_SHA", revision)
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "service": "yarqa-space",
+        "build": {"state": "OBSERVED", "revision": revision},
+        "receipt_minted": False,
+    }
+
+
+@pytest.mark.parametrize("revision", ["", "not-a-sha", "A" * 40, "f" * 39])
+def test_build_info_fails_closed_without_an_exact_revision(monkeypatch, revision):
+    monkeypatch.setenv("SZL_GIT_SHA", revision)
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.json()["build"] == {"state": "UNAVAILABLE", "revision": None}
+    assert r.json()["receipt_minted"] is False
+
+
 def test_livez_is_local_only(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("/livez must not resolve external feeds")
