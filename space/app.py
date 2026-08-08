@@ -131,7 +131,7 @@ _SOURCE_REVISION_ENV = "SZL_GIT_SHA"
 
 def _build_identity() -> dict[str, str | None]:
     """Return a source identity only when the governed revision is exact."""
-    revision = os.environ.get(_SOURCE_REVISION_ENV, "").strip().lower()
+    revision = os.environ.get(_SOURCE_REVISION_ENV, "").strip()
     is_exact_sha = len(revision) == 40 and all(
         character in "0123456789abcdef" for character in revision
     )
