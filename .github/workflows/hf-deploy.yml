@@ -16,15 +16,15 @@ name: Deploy to HuggingFace Space
 # README lives only on the Space and must not be clobbered (matches the prior
 # sync, which never touched it).
 #
-# DEPENDS ON szl-holdings/.github#172 — `reusable-hf-deploy.yml@main` only
-# resolves once that PR merges to .github main.
+# The reusable publisher is bound to the canonical immutable org release commit;
+# it checks out its own exact tools revision and installs the shared hash lock.
 #
 # Requires org/repo secret HF_TOKEN (HF write token, org write to SZLHOLDINGS),
 # passed via `secrets: inherit`. The deployer FAILS LOUDLY if it is absent.
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
     paths:
       - "space/**"
       - "yarqa/**"
@@ -40,8 +40,13 @@ concurrency:
 
 jobs:
   deploy:
-    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@main
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@3dde396da0b2c17722e8b78e9da34057801dce5d
     secrets: inherit
     with:
+      hf-repo: SZLHOLDINGS/yarqa
+      ref: ${{ github.sha }}
       dockerfile-path: space/Dockerfile
       include-readme: false
+      require-default-branch-tip: true
+      source-revision-variable: SZL_GIT_SHA
+      source-revision-probe-path: /api/build-info
