@@ -68,7 +68,8 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker run --rm -d --network none --name "$offline" "$IMAGE"
+          docker run --rm -d --network none --name "$offline" \
+            -e SOURCE_SHA="$SOURCE_SHA" "$IMAGE"
           test "$(docker exec "$offline" id -u)" = 1000
           docker exec -i "$offline" python - <<'PY'
           import json
