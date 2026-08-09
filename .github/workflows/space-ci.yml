@@ -44,10 +44,16 @@ jobs:
         with:
           ref: ${{ env.SOURCE_SHA }}
       - name: Build the digest-pinned and dependency-locked Space image
-        run: docker build --pull -f space/Dockerfile -t yarqa-space-pr:${SOURCE_SHA} .
+        run: |
+          docker build --pull -f space/Dockerfile \
+            -t yarqa-space-unbound:${SOURCE_SHA} .
+          docker build -f space/Dockerfile \
+            --build-arg SZL_GIT_SHA="${SOURCE_SHA}" \
+            -t yarqa-space-pr:${SOURCE_SHA} .
       - name: Exercise HF UID, offline liveness, health contract, and unknown-route 404
         env:
           IMAGE: yarqa-space-pr:${{ env.SOURCE_SHA }}
+          UNBOUND_IMAGE: yarqa-space-unbound:${{ env.SOURCE_SHA }}
         run: |
           set -euo pipefail
           name="yarqa-space-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -64,7 +70,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker run --rm -d --network none --name "$offline" "$IMAGE"
+          docker run --rm -d --network none --name "$offline" "$UNBOUND_IMAGE"
           test "$(docker exec "$offline" id -u)" = 1000
           docker exec -i "$offline" python - <<'PY'
           import json
@@ -83,12 +89,37 @@ jobs:
               time.sleep(1)
           else:
               raise SystemExit("offline /livez did not satisfy the liveness contract")
+
+          with urllib.request.urlopen("http://127.0.0.1:7860/api/build-info", timeout=3) as response:
+              build_info = json.load(response)
+          if build_info != {
+              "service": "yarqa-space",
+              "build": {"state": "UNAVAILABLE", "revision": None},
+              "receipt_minted": False,
+          }:
+              raise SystemExit("unbound image did not fail closed at /api/build-info")
           PY
 
-          docker run --rm -d --name "$name" -p 7860:7860 "$IMAGE"
+          docker run --rm -d --name "$name" -p 7860:7860 \
+            -e SZL_GIT_SHA=cccccccccccccccccccccccccccccccccccccccc "$IMAGE"
           test "$(docker exec "$name" id -u)" = 1000
+          test "$(docker exec "$name" stat -c '%U:%G:%a' /usr/share/szl)" = "root:root:555"
+          test "$(docker exec "$name" stat -c '%U:%G:%a' /usr/share/szl/source-revision)" = "root:root:444"
+          if docker exec "$name" chmod 0644 /usr/share/szl/source-revision; then
+            echo '::error::runtime UID changed immutable source identity permissions.'
+            exit 1
+          fi
+          if docker exec "$name" rm /usr/share/szl/source-revision; then
+            echo '::error::runtime UID removed immutable source identity.'
+            exit 1
+          fi
+          if docker exec "$name" sh -c 'printf %s dddddddddddddddddddddddddddddddddddddddd > /usr/share/szl/source-revision'; then
+            echo '::error::runtime UID replaced immutable source identity bytes.'
+            exit 1
+          fi
           python - <<'PY'
           import json
+          import os
           import time
           import urllib.error
           import urllib.request
@@ -111,6 +142,19 @@ jobs:
               health = json.load(response)
           if health.get("ok") is not True or health.get("service") != "yarqa-space":
               raise SystemExit("/healthz did not satisfy the source-of-truth contract")
+
+          with urllib.request.urlopen("http://127.0.0.1:7860/api/build-info", timeout=3) as response:
+              build_info = json.load(response)
+              cache_control = response.headers.get("Cache-Control")
+              content_type_options = response.headers.get("X-Content-Type-Options")
+          if build_info != {
+              "service": "yarqa-space",
+              "build": {"state": "OBSERVED", "revision": os.environ["SOURCE_SHA"]},
+              "receipt_minted": False,
+          }:
+              raise SystemExit("bound image did not expose the exact source revision")
+          if cache_control != "no-store" or content_type_options != "nosniff":
+              raise SystemExit("/api/build-info lacks required response hardening")
 
           try:
               urllib.request.urlopen("http://127.0.0.1:7860/definitely-missing", timeout=3)

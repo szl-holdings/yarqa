@@ -24,6 +24,82 @@ client = TestClient(space_app.app)
 VALID_STATES = {"LIVE", "SAMPLE"}
 
 
+def _set_baked_revision(monkeypatch, tmp_path, revision):
+    path = tmp_path / ".szl-source-revision"
+    path.write_bytes(revision.encode("ascii"))
+    monkeypatch.setattr(space_app, "_SOURCE_REVISION_FILE", path)
+
+
+def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch, tmp_path):
+    revision = "a" * 40
+    _set_baked_revision(monkeypatch, tmp_path, revision)
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "service": "yarqa-space",
+        "build": {"state": "OBSERVED", "revision": revision},
+        "receipt_minted": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "",
+        "not-a-sha",
+        "A" * 40,
+        "f" * 39,
+        "f" * 41,
+        " " + "f" * 40,
+        "f" * 40 + "\n",
+        "\t" + "f" * 40,
+    ],
+)
+def test_build_info_fails_closed_without_an_exact_revision(
+    monkeypatch, tmp_path, revision
+):
+    _set_baked_revision(monkeypatch, tmp_path, revision)
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.json()["build"] == {"state": "UNAVAILABLE", "revision": None}
+    assert r.json()["receipt_minted"] is False
+
+
+def test_build_info_fails_closed_when_identity_file_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        space_app, "_SOURCE_REVISION_FILE", tmp_path / "does-not-exist"
+    )
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.json()["build"] == {"state": "UNAVAILABLE", "revision": None}
+
+
+def test_build_info_ignores_runtime_environment(monkeypatch, tmp_path):
+    _set_baked_revision(monkeypatch, tmp_path, "b" * 40)
+    monkeypatch.setenv("SZL_GIT_SHA", "c" * 40)
+
+    r = client.get("/api/build-info")
+
+    assert r.json()["build"] == {"state": "OBSERVED", "revision": "b" * 40}
+
+
+def test_build_info_has_source_identity_security_headers(monkeypatch, tmp_path):
+    _set_baked_revision(monkeypatch, tmp_path, "b" * 40)
+
+    r = client.get("/api/build-info")
+
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    assert "default-src 'self'" in r.headers["content-security-policy"]
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
 def test_livez_is_local_only(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("/livez must not resolve external feeds")
