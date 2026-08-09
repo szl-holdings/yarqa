@@ -44,7 +44,11 @@ jobs:
         with:
           ref: ${{ env.SOURCE_SHA }}
       - name: Build the digest-pinned and dependency-locked Space image
-        run: docker build --pull -f space/Dockerfile -t yarqa-space-pr:${SOURCE_SHA} .
+        run: |
+          docker build --pull \
+            --build-arg SZL_SOURCE_REVISION="$SOURCE_SHA" \
+            -f space/Dockerfile \
+            -t yarqa-space-pr:${SOURCE_SHA} .
       - name: Exercise HF UID, offline liveness, health contract, and unknown-route 404
         env:
           IMAGE: yarqa-space-pr:${{ env.SOURCE_SHA }}
@@ -88,14 +92,14 @@ jobs:
               build_info = json.load(response)
           if build_info != {
               "service": "yarqa-space",
-              "build": {"state": "UNAVAILABLE", "revision": None},
+              "build": {"state": "OBSERVED", "revision": __import__("os").environ["SOURCE_SHA"]},
               "receipt_minted": False,
           }:
-              raise SystemExit("unbound image did not fail closed at /api/build-info")
+              raise SystemExit("offline image did not expose its immutable source revision")
           PY
 
           docker run --rm -d --name "$name" -p 7860:7860 \
-            -e SZL_GIT_SHA="$SOURCE_SHA" "$IMAGE"
+            -e SZL_GIT_SHA="$(printf 'f%.0s' {1..40})" "$IMAGE"
           test "$(docker exec "$name" id -u)" = 1000
           python - <<'PY'
           import json

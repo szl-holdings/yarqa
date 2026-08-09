@@ -126,12 +126,15 @@ CLAIM_TIER = (
     "Lambda=Conjecture 1; Khipu=Conjecture 2; SLSA L1"
 )
 
-_SOURCE_REVISION_ENV = "SZL_GIT_SHA"
+_SOURCE_REVISION_FILE = _HERE / "SOURCE_REVISION"
 
 
 def _build_identity() -> dict[str, str | None]:
-    """Return a source identity only when the governed revision is exact."""
-    revision = os.environ.get(_SOURCE_REVISION_ENV, "")
+    """Return only the immutable source revision baked into the image."""
+    try:
+        revision = _SOURCE_REVISION_FILE.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        revision = ""
     is_exact_sha = len(revision) == 40 and all(
         character in "0123456789abcdef" for character in revision
     )

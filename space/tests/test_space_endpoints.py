@@ -24,9 +24,12 @@ client = TestClient(space_app.app)
 VALID_STATES = {"LIVE", "SAMPLE"}
 
 
-def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch):
+def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch, tmp_path):
     revision = "a" * 40
-    monkeypatch.setenv("SZL_GIT_SHA", revision)
+    revision_file = tmp_path / "SOURCE_REVISION"
+    revision_file.write_text(revision + "\n", encoding="ascii")
+    monkeypatch.setattr(space_app, "_SOURCE_REVISION_FILE", revision_file)
+    monkeypatch.setenv("SZL_GIT_SHA", "f" * 40)
 
     r = client.get("/api/build-info")
 
@@ -51,8 +54,10 @@ def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch):
         "\t" + "f" * 40,
     ],
 )
-def test_build_info_fails_closed_without_an_exact_revision(monkeypatch, revision):
-    monkeypatch.setenv("SZL_GIT_SHA", revision)
+def test_build_info_fails_closed_without_an_exact_revision(monkeypatch, tmp_path, revision):
+    revision_file = tmp_path / "SOURCE_REVISION"
+    revision_file.write_text(revision, encoding="ascii")
+    monkeypatch.setattr(space_app, "_SOURCE_REVISION_FILE", revision_file)
 
     r = client.get("/api/build-info")
 
@@ -61,8 +66,10 @@ def test_build_info_fails_closed_without_an_exact_revision(monkeypatch, revision
     assert r.json()["receipt_minted"] is False
 
 
-def test_build_info_has_source_identity_security_headers(monkeypatch):
-    monkeypatch.setenv("SZL_GIT_SHA", "b" * 40)
+def test_build_info_has_source_identity_security_headers(monkeypatch, tmp_path):
+    revision_file = tmp_path / "SOURCE_REVISION"
+    revision_file.write_text("b" * 40, encoding="ascii")
+    monkeypatch.setattr(space_app, "_SOURCE_REVISION_FILE", revision_file)
 
     r = client.get("/api/build-info")
 
