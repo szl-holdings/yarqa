@@ -103,6 +103,20 @@ jobs:
           docker run --rm -d --name "$name" -p 7860:7860 \
             -e SZL_GIT_SHA=cccccccccccccccccccccccccccccccccccccccc "$IMAGE"
           test "$(docker exec "$name" id -u)" = 1000
+          test "$(docker exec "$name" stat -c '%U:%G:%a' /usr/share/szl)" = "root:root:555"
+          test "$(docker exec "$name" stat -c '%U:%G:%a' /usr/share/szl/source-revision)" = "root:root:444"
+          if docker exec "$name" chmod 0644 /usr/share/szl/source-revision; then
+            echo '::error::runtime UID changed immutable source identity permissions.'
+            exit 1
+          fi
+          if docker exec "$name" rm /usr/share/szl/source-revision; then
+            echo '::error::runtime UID removed immutable source identity.'
+            exit 1
+          fi
+          if docker exec "$name" sh -c 'printf %s dddddddddddddddddddddddddddddddddddddddd > /usr/share/szl/source-revision'; then
+            echo '::error::runtime UID replaced immutable source identity bytes.'
+            exit 1
+          fi
           python - <<'PY'
           import json
           import os

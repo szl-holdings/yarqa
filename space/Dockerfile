@@ -10,11 +10,13 @@ WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY yarqa /app/yarqa
 COPY space /app/space
-RUN if [ -n "$SZL_GIT_SHA" ]; then \
+RUN install -d -o root -g root -m 0555 /usr/share/szl && \
+    if [ -n "$SZL_GIT_SHA" ]; then \
       test "${#SZL_GIT_SHA}" -eq 40; \
       case "$SZL_GIT_SHA" in *[!0-9a-f]*) exit 2 ;; esac; \
-      printf '%s' "$SZL_GIT_SHA" > /app/.szl-source-revision; \
-      chmod 0444 /app/.szl-source-revision; \
+      printf '%s' "$SZL_GIT_SHA" > /usr/share/szl/source-revision; \
+      chown root:root /usr/share/szl/source-revision; \
+      chmod 0444 /usr/share/szl/source-revision; \
     fi
 RUN pip install --no-cache-dir --require-hashes -r space/requirements.lock && \
     pip install --no-cache-dir --no-deps --no-build-isolation -e . && \

@@ -126,7 +126,7 @@ CLAIM_TIER = (
     "Lambda=Conjecture 1; Khipu=Conjecture 2; SLSA L1"
 )
 
-_SOURCE_REVISION_FILE = Path("/app/.szl-source-revision")
+_SOURCE_REVISION_FILE = Path("/usr/share/szl/source-revision")
 
 
 def _build_identity() -> dict[str, str | None]:
