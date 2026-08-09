@@ -45,3 +45,5 @@ jobs:
     with:
       dockerfile-path: space/Dockerfile
       include-readme: false
+      source-revision-file: space/SOURCE_REVISION
+      require-default-branch-tip: true

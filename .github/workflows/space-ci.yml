@@ -45,8 +45,8 @@ jobs:
           ref: ${{ env.SOURCE_SHA }}
       - name: Build the digest-pinned and dependency-locked Space image
         run: |
+          printf '%s\n' "$SOURCE_SHA" > space/SOURCE_REVISION
           docker build --pull \
-            --build-arg SZL_SOURCE_REVISION="$SOURCE_SHA" \
             -f space/Dockerfile \
             -t yarqa-space-pr:${SOURCE_SHA} .
       - name: Exercise HF UID, offline liveness, health contract, and unknown-route 404

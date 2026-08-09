@@ -9,9 +9,8 @@ WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY yarqa /app/yarqa
 COPY space /app/space
-ARG SZL_SOURCE_REVISION=""
-RUN printf '%s' "$SZL_SOURCE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
-    printf '%s\n' "$SZL_SOURCE_REVISION" > /app/space/SOURCE_REVISION
+RUN test -f /app/space/SOURCE_REVISION && \
+    grep -Eq '^[0-9a-f]{40}$' /app/space/SOURCE_REVISION
 RUN pip install --no-cache-dir --require-hashes -r space/requirements.lock && \
     pip install --no-cache-dir --no-deps --no-build-isolation -e . && \
     useradd --create-home --uid 1000 --shell /usr/sbin/nologin yarqa && \

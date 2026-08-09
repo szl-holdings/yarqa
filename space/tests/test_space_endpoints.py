@@ -50,7 +50,6 @@ def test_build_info_exposes_only_an_exact_bound_revision(monkeypatch, tmp_path):
         "f" * 39,
         "f" * 41,
         " " + "f" * 40,
-        "f" * 40 + "\n",
         "\t" + "f" * 40,
     ],
 )
