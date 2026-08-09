@@ -3,12 +3,19 @@
 FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
 
 ENV PYTHONUNBUFFERED=1 PORT=7860
+ARG SZL_GIT_SHA=""
 WORKDIR /app
 
 # Install the yarqa package itself (parent dir) plus the space requirements.
 COPY pyproject.toml /app/pyproject.toml
 COPY yarqa /app/yarqa
 COPY space /app/space
+RUN if [ -n "$SZL_GIT_SHA" ]; then \
+      test "${#SZL_GIT_SHA}" -eq 40; \
+      case "$SZL_GIT_SHA" in *[!0-9a-f]*) exit 2 ;; esac; \
+      printf '%s' "$SZL_GIT_SHA" > /app/.szl-source-revision; \
+      chmod 0444 /app/.szl-source-revision; \
+    fi
 RUN pip install --no-cache-dir --require-hashes -r space/requirements.lock && \
     pip install --no-cache-dir --no-deps --no-build-isolation -e . && \
     useradd --create-home --uid 1000 --shell /usr/sbin/nologin yarqa && \
