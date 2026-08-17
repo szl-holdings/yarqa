@@ -1,4 +1,4 @@
 numpy>=1.23
 fastapi>=0.141.1
-uvicorn[standard]>=0.52.1
+uvicorn[standard]>=0.52.3
 pydantic>=2.13.4
