@@ -20,46 +20,82 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
-      - name: Verify dependency installation contract
+      - name: Install, attest, and test the locked graph
         run: |
-          python - <<'PY'
+          python -m venv .ci-venv
+          .ci-venv/bin/python -m pip install --no-cache-dir --require-hashes --force-reinstall -r .github/requirements/space-ci.lock
+          .ci-venv/bin/python -m pip install --no-cache-dir --no-deps --no-build-isolation .
+          .ci-venv/bin/python -m pip check
+          .ci-venv/bin/python - <<'PY'
+          from importlib.metadata import distributions
           from pathlib import Path
+          import re
 
-          workflow = Path(".github/workflows/space-ci.yml").read_text(encoding="utf-8")
-          install_token = "pip " + "install"
-          install_lines = [
-              line.strip()
-              for line in workflow.splitlines()
-              if install_token in line and not line.lstrip().startswith("#")
-          ]
-          expected = [
-              "python -m " + install_token + " --no-cache-dir --require-hashes -r .github/requirements/space-ci.lock",
-              "python -m " + install_token + " --no-cache-dir --no-deps --no-build-isolation -e .",
-          ]
-          if install_lines != expected:
+          def canonical(name: str) -> str:
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+          lock = Path(".github/requirements/space-ci.lock").read_text(encoding="utf-8")
+          requirement = re.compile(
+              r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)"
+          )
+          expected = {}
+          for line in lock.splitlines():
+              match = requirement.match(line)
+              if match:
+                  expected[canonical(match.group(1))] = match.group(2)
+          expected["yarqa"] = "0.4.0"
+
+          actual_versions = {}
+          for dist in distributions():
+              if dist.metadata.get("Name"):
+                  actual_versions.setdefault(
+                      canonical(dist.metadata["Name"]), []
+                  ).append(dist.version)
+          duplicates = {
+              name: sorted(versions)
+              for name, versions in actual_versions.items()
+              if len(versions) != 1
+          }
+          if duplicates:
               raise SystemExit(
-                  f"dependency install contract mismatch: expected {expected}, got {install_lines}"
+                  f"duplicate installed distributions detected: {duplicates}"
               )
-          PY
-      - name: Install locked runtime and test tools
-        run: |
-          python -m pip install --no-cache-dir --require-hashes -r .github/requirements/space-ci.lock
-          python -m pip install --no-cache-dir --no-deps --no-build-isolation -e .
-          python - <<'PY'
-          from importlib.metadata import version
-
-          expected = {"fastapi": "0.141.1", "uvicorn": "0.52.4"}
-          actual = {name: version(name) for name in expected}
-          print(f"locked test runtime versions: {actual}")
+          actual = {
+              name: versions[0]
+              for name, versions in actual_versions.items()
+          }
+          print(f"locked test environment: {actual}")
           if actual != expected:
+              missing = sorted(set(expected) - set(actual))
+              extra = sorted(set(actual) - set(expected))
+              drift = sorted(
+                  name
+                  for name in set(actual) & set(expected)
+                  if actual[name] != expected[name]
+              )
               raise SystemExit(
-                  f"locked test runtime mismatch: expected {expected}, got {actual}"
+                  "locked test environment mismatch: "
+                  f"missing={missing}, extra={extra}, drift={drift}"
+              )
+
+          required = {
+              "fastapi": "0.141.1",
+              "httpx": "0.28.1",
+              "pip": "26.2.1",
+              "pytest": "8.4.2",
+              "setuptools": "84.0.0",
+              "uvicorn": "0.52.4",
+              "wheel": "0.48.0",
+          }
+          observed = {name: actual.get(name) for name in required}
+          print(f"locked test runtime versions: {observed}")
+          if observed != required:
+              raise SystemExit(
+                  f"locked test runtime mismatch: expected {required}, got {observed}"
               )
           PY
-      - name: Package tests
-        run: pytest tests/ -q
-      - name: Space endpoint tests
-        run: pytest space/tests/test_space_endpoints.py -q
+          .ci-venv/bin/python -m pytest tests/ -q
+          .ci-venv/bin/python -m pytest space/tests/test_space_endpoints.py -q
       - name: Verify vendored THREE is r160 (sovereign, zero CDN)
         run: |
           grep -q "REVISION = '160'" space/static/lib/three.min.js
@@ -103,17 +139,82 @@ jobs:
 
           docker run --rm -d --network none --name "$offline" "$UNBOUND_IMAGE"
           test "$(docker exec "$offline" id -u)" = 1000
+          test "$(docker exec "$offline" stat -c '%U:%G:%a' /app/space/app.py)" = "root:root:644"
+          if docker exec "$offline" sh -c 'printf x >> /app/space/app.py'; then
+            echo '::error::runtime UID modified root-owned Space source.'
+            exit 1
+          fi
           docker exec -i "$offline" python - <<'PY'
-          from importlib.metadata import version
+          from importlib.metadata import distributions, version
+          from pathlib import Path
           import json
+          import re
           import time
           import urllib.request
+          import yarqa
+
+          def canonical(name: str) -> str:
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+          lock = Path("/app/space/requirements.lock").read_text(encoding="utf-8")
+          requirement = re.compile(
+              r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)"
+          )
+          expected = {}
+          for line in lock.splitlines():
+              match = requirement.match(line)
+              if match:
+                  expected[canonical(match.group(1))] = match.group(2)
+          expected["yarqa"] = "0.4.0"
+
+          actual_versions = {}
+          for dist in distributions():
+              if dist.metadata.get("Name"):
+                  actual_versions.setdefault(
+                      canonical(dist.metadata["Name"]), []
+                  ).append(dist.version)
+          duplicates = {
+              name: sorted(versions)
+              for name, versions in actual_versions.items()
+              if len(versions) != 1
+          }
+          if duplicates:
+              raise SystemExit(
+                  f"duplicate container distributions detected: {duplicates}"
+              )
+          actual = {
+              name: versions[0]
+              for name, versions in actual_versions.items()
+          }
+          if actual != expected:
+              raise SystemExit(
+                  f"container dependency closure mismatch: expected {expected}, got {actual}"
+              )
+
+          package_path = Path(yarqa.__file__).resolve()
+          if Path("/app") in package_path.parents:
+              raise SystemExit(
+                  f"yarqa package remains editable from the runtime source tree: {package_path}"
+              )
 
           runtime_versions = {
               dependency: version(dependency)
-              for dependency in ("fastapi", "starlette", "uvicorn")
+              for dependency in (
+                  "fastapi",
+                  "pip",
+                  "setuptools",
+                  "starlette",
+                  "uvicorn",
+                  "wheel",
+              )
           }
-          expected_runtime_versions = {"fastapi": "0.141.1", "uvicorn": "0.52.4"}
+          expected_runtime_versions = {
+              "fastapi": "0.141.1",
+              "pip": "26.2.1",
+              "setuptools": "84.0.0",
+              "uvicorn": "0.52.4",
+              "wheel": "0.48.0",
+          }
           print(f"locked container runtime versions: {runtime_versions}")
           for dependency, expected in expected_runtime_versions.items():
               if runtime_versions[dependency] != expected:
