@@ -116,6 +116,12 @@ def test_livez_is_local_only(monkeypatch):
     }
 
 
+def test_openapi_version_matches_the_loaded_yarqa_package():
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    assert r.json()["info"]["version"] == space_app.yarqa.__version__
+
+
 def test_healthz_source_of_truth():
     r = client.get("/healthz")
     assert r.status_code == 200

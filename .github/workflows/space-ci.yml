@@ -43,7 +43,7 @@ jobs:
               match = requirement.match(line)
               if match:
                   expected[canonical(match.group(1))] = match.group(2)
-          expected["yarqa"] = "0.4.0"
+          expected["yarqa"] = "0.5.0"
 
           actual_versions = {}
           for dist in distributions():
@@ -165,7 +165,7 @@ jobs:
               match = requirement.match(line)
               if match:
                   expected[canonical(match.group(1))] = match.group(2)
-          expected["yarqa"] = "0.4.0"
+          expected["yarqa"] = "0.5.0"
 
           actual_versions = {}
           for dist in distributions():

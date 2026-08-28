@@ -22,9 +22,10 @@ PRODUCTION_REQUIREMENTS = ROOT / "space" / "requirements.txt"
 DOCKERFILE = ROOT / "space" / "Dockerfile"
 PYPROJECT = ROOT / "pyproject.toml"
 SPACE_APP = ROOT / "space" / "app.py"
+PACKAGE_INIT = ROOT / "yarqa" / "__init__.py"
 STEP_NAME = "Install, attest, and test the locked graph"
-EXPECTED_RUN_SHA256 = "2fb61c79caa2a142e1cfd4288844f0b4a94c783350d3c4341039f935e5dc2bc9"
-EXPECTED_WORKFLOW_SHA256 = "3bd454f6dc954c17cd469fb2506bed4decae12057051480607ce0f4f90635f42"
+EXPECTED_RUN_SHA256 = "3c4693deaef601f8a0d57a061732b052165b26bb6e3b64ea654992f077d75bab"
+EXPECTED_WORKFLOW_SHA256 = "2b10bb963984507bffa2ba1112f6c71e751ba32378de5b93d1253409580a355e"
 EXPECTED_HF_DEPLOY_SHA256 = "daf5935570e35191df980f92e6c78d7e76e68376dde8585ecbae95edac9f8711"
 EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
 
@@ -144,6 +145,28 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
             self.workflow.count(
                 'body.get("yarqa_package_source") == "installed-distribution"'
             ),
+        )
+
+    @unittest.skipIf(tomllib is None, "TOML contract requires Python 3.11+")
+    def test_package_metadata_runtime_and_workflow_versions_match(self) -> None:
+        assert tomllib is not None
+        project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+        package_source = PACKAGE_INIT.read_text(encoding="utf-8")
+        match = re.search(r'(?m)^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"$', package_source)
+        self.assertIsNotNone(match)
+        assert match is not None
+        version = match.group(1)
+        self.assertEqual("0.5.0", version)
+        self.assertEqual(version, project["project"]["version"])
+        self.assertEqual(
+            1,
+            SPACE_APP.read_text(encoding="utf-8").count(
+                "FastAPI(title=\"yarqa Space\", version=yarqa.__version__)"
+            ),
+        )
+        self.assertEqual(
+            2,
+            self.workflow.count(f'expected["yarqa"] = "{version}"'),
         )
 
     def test_rejects_alternate_package_installs(self) -> None:
