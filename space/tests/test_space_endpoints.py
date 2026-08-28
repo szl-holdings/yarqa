@@ -112,6 +112,7 @@ def test_livez_is_local_only(monkeypatch):
         "service": "yarqa-space",
         "check": "liveness",
         "yarqa_version": space_app.yarqa.__version__,
+        "yarqa_package_source": space_app._YARQA_PACKAGE_SOURCE,
     }
 
 

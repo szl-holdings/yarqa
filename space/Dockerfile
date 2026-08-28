@@ -2,7 +2,7 @@
 # yarqa Space — FastAPI + sovereign static app (vendored THREE r160, zero CDN).
 FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
 
-ENV PYTHONUNBUFFERED=1 PORT=7860
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=7860
 ARG SZL_GIT_SHA=""
 WORKDIR /app
 
@@ -18,10 +18,10 @@ RUN install -d -o root -g root -m 0555 /usr/share/szl && \
       chown root:root /usr/share/szl/source-revision; \
       chmod 0444 /usr/share/szl/source-revision; \
     fi
-RUN pip install --no-cache-dir --require-hashes -r space/requirements.lock && \
-    pip install --no-cache-dir --no-deps --no-build-isolation -e . && \
-    useradd --create-home --uid 1000 --shell /usr/sbin/nologin yarqa && \
-    chown -R yarqa:yarqa /app
+RUN python -m pip install --no-cache-dir --require-hashes --force-reinstall -r space/requirements.lock && \
+    python -m pip install --no-cache-dir --no-deps --no-build-isolation . && \
+    python -m pip check && \
+    useradd --create-home --uid 1000 --shell /usr/sbin/nologin yarqa
 
 EXPOSE 7860
 WORKDIR /app/space

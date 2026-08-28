@@ -47,6 +47,7 @@ jobs:
       ref: ${{ github.sha }}
       dockerfile-path: space/Dockerfile
       include-readme: false
+      prune: true
       require-default-branch-tip: true
       source-revision-variable: SZL_GIT_SHA
       source-revision-probe-path: /api/build-info
