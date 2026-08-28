@@ -67,7 +67,7 @@ if _REPO == Path("/app") and _YARQA_PACKAGE_SOURCE != "installed-distribution":
         f"{_YARQA_PACKAGE_PATH}"
     )
 
-app = FastAPI(title="yarqa Space", version="0.4.0")
+app = FastAPI(title="yarqa Space", version=yarqa.__version__)
 
 # ---------------------------------------------------------------------------
 # SAFE-NOW hardening (R2) — real response headers on a real (FastAPI) server.
