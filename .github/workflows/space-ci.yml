@@ -26,7 +26,7 @@ jobs:
           .ci-venv/bin/python -m pip install --no-cache-dir --require-hashes --force-reinstall -r .github/requirements/space-ci.lock
           .ci-venv/bin/python -m pip install --no-cache-dir --no-deps --no-build-isolation .
           .ci-venv/bin/python -m pip check
-          .ci-venv/bin/python - <<'PY'
+          .ci-venv/bin/python -I - <<'PY'
           from importlib.metadata import distributions
           from pathlib import Path
           import re

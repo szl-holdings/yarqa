@@ -22,8 +22,8 @@ PRODUCTION_REQUIREMENTS = ROOT / "space" / "requirements.txt"
 DOCKERFILE = ROOT / "space" / "Dockerfile"
 PYPROJECT = ROOT / "pyproject.toml"
 STEP_NAME = "Install, attest, and test the locked graph"
-EXPECTED_RUN_SHA256 = "c1c8c1f1deed556d0525426a042b4a79ee466114e410b9dba6966e620cff8a4f"
-EXPECTED_WORKFLOW_SHA256 = "c8047b301ed49594dfc6a9956d6682de25bdf7f1409357bdfa72303a4f4d7af0"
+EXPECTED_RUN_SHA256 = "2fb61c79caa2a142e1cfd4288844f0b4a94c783350d3c4341039f935e5dc2bc9"
+EXPECTED_WORKFLOW_SHA256 = "25e3fb4d3360b04c598be2364b924f89419374cc30355f8b2deb46ef27e1e100"
 EXPECTED_HF_DEPLOY_SHA256 = "daf5935570e35191df980f92e6c78d7e76e68376dde8585ecbae95edac9f8711"
 EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
 
@@ -123,6 +123,10 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
 
     def test_repository_workflow_satisfies_contract(self) -> None:
         self.assertEqual([], dependency_contract_errors(self.workflow))
+
+    def test_environment_attestation_excludes_checkout_metadata(self) -> None:
+        body, _ = _extract_run_block(self.workflow)
+        self.assertEqual(1, body.count(".ci-venv/bin/python -I - <<'PY'"))
 
     def test_rejects_alternate_package_installs(self) -> None:
         marker = "  container-contract:\n"
