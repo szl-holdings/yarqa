@@ -228,7 +228,11 @@ jobs:
               try:
                   with urllib.request.urlopen("http://127.0.0.1:7860/livez", timeout=2) as response:
                       body = json.load(response)
-                  if body.get("ok") is True and body.get("check") == "liveness":
+                  if (
+                      body.get("ok") is True
+                      and body.get("check") == "liveness"
+                      and body.get("yarqa_package_source") == "installed-distribution"
+                  ):
                       break
               except (OSError, ValueError):
                   pass
@@ -276,7 +280,11 @@ jobs:
               try:
                   with urllib.request.urlopen(liveness, timeout=2) as response:
                       body = json.load(response)
-                  if body.get("ok") is True and body.get("check") == "liveness":
+                  if (
+                      body.get("ok") is True
+                      and body.get("check") == "liveness"
+                      and body.get("yarqa_package_source") == "installed-distribution"
+                  ):
                       break
               except (OSError, ValueError):
                   pass

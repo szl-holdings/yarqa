@@ -21,9 +21,10 @@ PRODUCTION_LOCK = ROOT / "space" / "requirements.lock"
 PRODUCTION_REQUIREMENTS = ROOT / "space" / "requirements.txt"
 DOCKERFILE = ROOT / "space" / "Dockerfile"
 PYPROJECT = ROOT / "pyproject.toml"
+SPACE_APP = ROOT / "space" / "app.py"
 STEP_NAME = "Install, attest, and test the locked graph"
 EXPECTED_RUN_SHA256 = "2fb61c79caa2a142e1cfd4288844f0b4a94c783350d3c4341039f935e5dc2bc9"
-EXPECTED_WORKFLOW_SHA256 = "25e3fb4d3360b04c598be2364b924f89419374cc30355f8b2deb46ef27e1e100"
+EXPECTED_WORKFLOW_SHA256 = "3bd454f6dc954c17cd469fb2506bed4decae12057051480607ce0f4f90635f42"
 EXPECTED_HF_DEPLOY_SHA256 = "daf5935570e35191df980f92e6c78d7e76e68376dde8585ecbae95edac9f8711"
 EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
 
@@ -127,6 +128,23 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
     def test_environment_attestation_excludes_checkout_metadata(self) -> None:
         body, _ = _extract_run_block(self.workflow)
         self.assertEqual(1, body.count(".ci-venv/bin/python -I - <<'PY'"))
+
+    def test_serving_process_cannot_shadow_the_installed_distribution(self) -> None:
+        app_source = SPACE_APP.read_text(encoding="utf-8")
+        self.assertNotIn("sys.path.insert", app_source)
+        self.assertEqual(
+            1,
+            app_source.count(
+                '_REPO == Path("/app") and _YARQA_PACKAGE_SOURCE != '
+                '"installed-distribution"'
+            ),
+        )
+        self.assertEqual(
+            2,
+            self.workflow.count(
+                'body.get("yarqa_package_source") == "installed-distribution"'
+            ),
+        )
 
     def test_rejects_alternate_package_installs(self) -> None:
         marker = "  container-contract:\n"

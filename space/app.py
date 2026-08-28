@@ -22,7 +22,6 @@ Endpoints:
 from __future__ import annotations
 
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -34,12 +33,13 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Make the parent yarqa package importable when run from the space/ dir or HF.
+# The production image installs Yarqa as a wheel. Do not add the repository
+# parent to sys.path here: /app/yarqa must never shadow the installed package.
+# Local source tests may still place the checkout on sys.path before importing
+# this module, but the container contract requires the serving process to report
+# the installed-distribution state below.
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
-for p in (str(_REPO), str(_HERE)):
-    if p not in sys.path:
-        sys.path.insert(0, p)
 
 import yarqa  # noqa: E402
 from yarqa import (  # noqa: E402
@@ -54,6 +54,18 @@ from yarqa import (  # noqa: E402
 from yarqa.core import compartment_summary  # noqa: E402
 
 import feeds as feeds_mod  # noqa: E402
+
+_YARQA_PACKAGE_PATH = Path(yarqa.__file__).resolve()
+_YARQA_PACKAGE_SOURCE = (
+    "source-tree"
+    if _REPO == _YARQA_PACKAGE_PATH or _REPO in _YARQA_PACKAGE_PATH.parents
+    else "installed-distribution"
+)
+if _REPO == Path("/app") and _YARQA_PACKAGE_SOURCE != "installed-distribution":
+    raise RuntimeError(
+        f"production must import the installed Yarqa distribution, got "
+        f"{_YARQA_PACKAGE_PATH}"
+    )
 
 app = FastAPI(title="yarqa Space", version="0.4.0")
 
@@ -178,6 +190,7 @@ def livez() -> JSONResponse:
         "service": "yarqa-space",
         "check": "liveness",
         "yarqa_version": yarqa.__version__,
+        "yarqa_package_source": _YARQA_PACKAGE_SOURCE,
     })
 
 
