@@ -13,7 +13,10 @@ authors = [{ name = "SZL Holdings" }]
 dependencies = ["numpy>=1.23"]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = [
+    "httpx==0.28.1",
+    "pytest==8.4.2",
+]
 
 [tool.setuptools.packages.find]
 include = ["yarqa*"]
