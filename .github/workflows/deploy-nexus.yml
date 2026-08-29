@@ -120,15 +120,54 @@ jobs:
             --prune \
             --manifest-out hf-deploy-manifest.json
 
-      - name: Restart Space after governed publication
+      - name: Prune MK-II leftovers and factory-reboot the Space
         env:
           HF_REPO: SZLHOLDINGS/nexus
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P tools/.github/scripts/hf_deploy_from_dockerfile.py \
-            --restart-space \
-            --manifest hf-deploy-manifest.json \
-            --hf-repo "$HF_REPO"
+          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P - <<'PY'
+          import json
+          import os
+          from huggingface_hub import CommitOperationDelete, HfApi
+
+          repo = os.environ["HF_REPO"]
+          token = os.environ["HF_TOKEN"]
+          leftover = {
+              "assets/index-BqsGtaPN.js",
+              "assets/routes-QKL340ti.js",
+              "assets/styles-BEMlM2we.css",
+              "favicon.svg",
+              "index.html",
+              "og.jpg",
+              "server.py",
+          }
+          api = HfApi(token=token)
+          live = set(api.list_repo_files(repo_id=repo, repo_type="space"))
+          deletes = [
+              CommitOperationDelete(path_in_repo=path)
+              for path in sorted(leftover & live)
+          ]
+          sha = json.load(open("hf-deploy-manifest.json"))["hf_commit_oid"]
+          if deletes:
+              commit = api.create_commit(
+                  repo_id=repo,
+                  repo_type="space",
+                  operations=deletes,
+                  commit_message="deploy(hf): prune leftover MK-II python snapshot",
+              )
+              sha = commit.oid
+              print(f"pruned {len(deletes)} leftover paths -> {sha}")
+          else:
+              print("no leftover MK-II paths on the Space")
+          manifest = json.load(open("hf-deploy-manifest.json"))
+          manifest["hf_commit_oid"] = sha
+          manifest["pruned_unmanaged"] = sorted(leftover & live)
+          json.dump(manifest, open("hf-deploy-manifest.json", "w"), indent=2, sort_keys=True)
+          runtime = api.restart_space(repo_id=repo, factory_reboot=True)
+          stage = getattr(runtime, "stage", runtime)
+          print(f"factory reboot requested for {repo}@{sha}; stage {stage!r}")
+          PY
+
 
       - name: Attest exact running commit, bytes, and smoke routes
         env:
