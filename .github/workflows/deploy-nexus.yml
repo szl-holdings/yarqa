@@ -1,11 +1,11 @@
 # Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
 name: Deploy NEXUS Space
 
-# Publisher: this repository already holds the governed HF write token.
-# The canonical reusable always checkouts the CALLER, so NEXUS files
+# One-shot publisher: this repository already holds the governed HF write
+# token. The canonical reusable always checkouts the CALLER, so NEXUS files
 # cannot be published from szl-holdings/nexus until that repo is granted
-# HF_ORG_TOKEN. This job checkouts szl-holdings/nexus and runs the same
-# pinned publisher as reusable-hf-deploy.yml@e3ec47ad.
+# HF_ORG_TOKEN. This job checkouts szl-holdings/nexus, builds the Nitro
+# node-server bundle, and runs the pinned publisher against space/Dockerfile.
 #
 # workflow_dispatch only.
 
@@ -17,10 +17,10 @@ on:
         required: true
         default: "main"
       recreate-space:
-        description: "Delete and recreate SZLHOLDINGS/nexus before publish (clears corrupt factory cache)"
+        description: "Delete and recreate SZLHOLDINGS/nexus before publish"
         required: false
-        type: boolean
         default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -71,6 +71,21 @@ jobs:
             exit 2
           fi
 
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Build NEXUS node-server bundle
+        working-directory: caller
+        run: |
+          set -euo pipefail
+          npm ci
+          NITRO_PRESET=node-server node scripts/with-app-env.mjs ./node_modules/.bin/vite build
+          test -f .output/server/index.mjs
+          rm -rf space-dist
+          mv .output space-dist
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -118,22 +133,18 @@ jobs:
           api = HfApi(token=os.environ["HF_TOKEN"])
           try:
               api.delete_repo(repo_id=repo, repo_type="space")
-              print(f"deleted space {repo}")
+              print(f"deleted {repo}")
           except Exception as exc:
               print(f"delete skipped: {type(exc).__name__}: {exc}")
           time.sleep(3)
-          created = api.create_repo(
+          api.create_repo(
               repo_id=repo,
               repo_type="space",
               space_sdk="docker",
               space_hardware="cpu-basic",
               exist_ok=True,
           )
-          print(f"created space {repo}: {created}")
-          try:
-              api.request_space_hardware(repo_id=repo, hardware="cpu-basic")
-          except Exception as exc:
-              print(f"hardware request skipped: {type(exc).__name__}: {exc}")
+          print(f"created docker Space {repo} on cpu-basic")
           PY
 
       - name: Deploy Dockerfile-derived files to the Space
@@ -152,7 +163,7 @@ jobs:
             --hf-repo "$HF_REPO" \
             --ref "$SOURCE_SHA" \
             --source-sha "$SOURCE_SHA" \
-            --dockerfile-path Dockerfile \
+            --dockerfile-path space/Dockerfile \
             --include-readme true \
             --smoke-paths '["/"]' \
             --prune \
@@ -197,6 +208,7 @@ jobs:
         env:
           HF_REPO: SZLHOLDINGS/nexus
         run: |
+          set -euo pipefail
           "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P - <<'PY'
           import os
           import urllib.error
@@ -204,15 +216,17 @@ jobs:
 
           repo = os.environ["HF_REPO"]
           token = os.environ["HF_TOKEN"]
-          headers = {"Authorization": f"Bearer {token}", "User-Agent": "nexus-deploy/1.0"}
           for path in (
               f"https://huggingface.co/api/spaces/{repo}",
               f"https://huggingface.co/api/spaces/{repo}/logs",
               f"https://huggingface.co/api/spaces/{repo}/logs/error",
           ):
-              req = urllib.request.Request(path, headers=headers)
+              req = urllib.request.Request(
+                  path,
+                  headers={"Authorization": f"Bearer {token}"},
+              )
               try:
-                  with urllib.request.urlopen(req, timeout=30) as resp:
+                  with urllib.request.urlopen(req, timeout=45) as resp:
                       body = resp.read()[:8000]
                       print(f"=== {path} HTTP {resp.status} ===")
                       print(body.decode("utf-8", "replace"))
@@ -220,7 +234,7 @@ jobs:
                   print(f"=== {path} HTTP {exc.code} ===")
                   print(exc.read()[:2000].decode("utf-8", "replace"))
               except Exception as exc:
-                  print(f"=== {path} {type(exc).__name__}: {exc}")
+                  print(f"=== {path} {type(exc).__name__}: {exc} ===")
           PY
 
       - name: Upload immutable deployment evidence
