@@ -1,0 +1,151 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: Deploy NEXUS Space
+
+# One-shot publisher: this repository already holds the governed HF write
+# token. The canonical reusable always checkouts the CALLER, so NEXUS files
+# cannot be published from szl-holdings/nexus until that repo is granted
+# HF_ORG_TOKEN. This job checkouts szl-holdings/nexus and runs the same
+# pinned publisher as reusable-hf-deploy.yml@e3ec47ad.
+#
+# workflow_dispatch only. Do not merge to yarqa main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      nexus-ref:
+        description: "szl-holdings/nexus ref to publish"
+        required: true
+        default: "main"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-nexus-space
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish NEXUS COPY set to SZLHOLDINGS/nexus
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HF_TOKEN: ${{ secrets.HF_ORG_TOKEN || secrets.HF_TOKEN }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout NEXUS source of truth
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: szl-holdings/nexus
+          ref: ${{ inputs.nexus-ref }}
+          path: caller
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact reusable-workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: szl-holdings/.github
+          ref: e3ec47ad2e99a535839afe0f30fefbd8973d52da
+          path: tools
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact publisher tools revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_TOOLS_SHA='e3ec47ad2e99a535839afe0f30fefbd8973d52da'
+          ACTUAL_TOOLS_SHA="$(git -C tools rev-parse --verify HEAD)"
+          if [ "$ACTUAL_TOOLS_SHA" != "$EXPECTED_TOOLS_SHA" ]; then
+            echo "::error::Reusable-workflow tools mismatch: expected $EXPECTED_TOOLS_SHA, found $ACTUAL_TOOLS_SHA"
+            exit 2
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.10"
+
+      - name: Create fresh publisher virtual environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          VENV="$RUNNER_TEMP/hf-publisher-venv"
+          python3 -m venv "$VENV"
+          ACTUAL_VERSION="$("$VENV/bin/python" -I -P -c 'import platform; print(platform.python_version())')"
+          if [ "$ACTUAL_VERSION" != "3.12.10" ]; then
+            echo "::error::Expected publisher Python 3.12.10, found $ACTUAL_VERSION."
+            exit 2
+          fi
+
+      - name: Install hash-locked deployment client closure
+        shell: bash
+        run: >-
+          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P -m pip install
+          --disable-pip-version-check --require-hashes --only-binary=:all:
+          --ignore-installed -r tools/requirements/hf-publisher.lock
+
+      - name: Require governed publisher
+        run: |
+          set -euo pipefail
+          test -n "${HF_TOKEN:-}" || {
+            echo '::error::HF_TOKEN is not configured for the NEXUS publisher.'
+            exit 2
+          }
+
+      - name: Deploy Dockerfile-derived files to the Space
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: szl-holdings/nexus
+          HF_REPO: SZLHOLDINGS/nexus
+          DEPLOY_REF: ${{ inputs.nexus-ref }}
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git -C caller rev-parse HEAD)"
+          echo "Deploying szl-holdings/nexus -> SZLHOLDINGS/nexus @ ${DEPLOY_REF} (${SOURCE_SHA})"
+          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P tools/.github/scripts/hf_deploy_from_dockerfile.py \
+            --repo-root caller \
+            --github-repo "$GH_REPO" \
+            --hf-repo "$HF_REPO" \
+            --ref "$SOURCE_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --dockerfile-path Dockerfile \
+            --include-readme true \
+            --smoke-paths '["/"]' \
+            --prune \
+            --manifest-out hf-deploy-manifest.json
+
+      - name: Restart Space after governed publication
+        env:
+          HF_REPO: SZLHOLDINGS/nexus
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P tools/.github/scripts/hf_deploy_from_dockerfile.py \
+            --restart-space \
+            --manifest hf-deploy-manifest.json \
+            --hf-repo "$HF_REPO"
+
+      - name: Attest exact running commit, bytes, and smoke routes
+        env:
+          HF_REPO: SZLHOLDINGS/nexus
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P tools/.github/scripts/hf_deploy_from_dockerfile.py \
+            --attest \
+            --manifest hf-deploy-manifest.json \
+            --hf-repo "$HF_REPO" \
+            --wait-running 900
+
+      - name: Upload immutable deployment evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hf-deploy-nexus-evidence
+          path: hf-deploy-manifest.json
+          if-no-files-found: warn
+          retention-days: 90
