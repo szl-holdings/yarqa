@@ -194,7 +194,21 @@ jobs:
           except Exception as exc:
               print(f"hardware request skipped: {type(exc).__name__}: {exc}")
 
-          deadline = time.time() + 180
+          hardware, stage = snapshot()
+          print(f"hardware={hardware!r} stage={stage!r}")
+          # PAUSED/SLEEPING spaces report hardware=None until woken.
+          # A normal restart resumes sleep. factory_reboot stays False —
+          # reboot detaches cpu-basic and the factory then BUILD_ERRORs.
+          if hardware is None and str(stage) in ("PAUSED", "STOPPED", "SLEEPING"):
+              try:
+                  asleep = str(stage)
+                  runtime = api.restart_space(repo_id=repo, factory_reboot=False)
+                  stage = getattr(runtime, "stage", stage)
+                  print(f"woke {asleep} without factory-reboot; now {stage!r}")
+              except Exception as exc:
+                  print(f"wake skipped: {type(exc).__name__}: {exc}")
+
+          deadline = time.time() + 420
           hardware, stage = snapshot()
           print(f"hardware={hardware!r} stage={stage!r}")
           while hardware is None and time.time() < deadline:
