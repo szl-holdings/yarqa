@@ -169,7 +169,7 @@ jobs:
             --prune \
             --manifest-out hf-deploy-manifest.json
 
-      - name: Factory-reboot the Space
+      - name: Attach cpu-basic and restart the Space
         env:
           HF_REPO: SZLHOLDINGS/nexus
         run: |
@@ -177,19 +177,46 @@ jobs:
           "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P - <<'PY'
           import json
           import os
+          import time
           from huggingface_hub import HfApi
 
           repo = os.environ["HF_REPO"]
           api = HfApi(token=os.environ["HF_TOKEN"])
           sha = json.load(open("hf-deploy-manifest.json"))["hf_commit_oid"]
+
+          def snapshot():
+              rt = api.get_space_runtime(repo_id=repo)
+              return getattr(rt, "hardware", None), getattr(rt, "stage", None)
+
           try:
               api.request_space_hardware(repo_id=repo, hardware="cpu-basic")
               print("requested cpu-basic hardware")
           except Exception as exc:
               print(f"hardware request skipped: {type(exc).__name__}: {exc}")
-          runtime = api.restart_space(repo_id=repo, factory_reboot=True)
+
+          deadline = time.time() + 180
+          hardware, stage = snapshot()
+          print(f"hardware={hardware!r} stage={stage!r}")
+          while hardware is None and time.time() < deadline:
+              time.sleep(10)
+              try:
+                  api.request_space_hardware(repo_id=repo, hardware="cpu-basic")
+              except Exception as exc:
+                  print(f"hardware request skipped: {type(exc).__name__}: {exc}")
+              hardware, stage = snapshot()
+              print(f"hardware={hardware!r} stage={stage!r}")
+
+          if hardware is None:
+              raise SystemExit(
+                  "cpu-basic never attached. Refusing restart on a Space with no hardware."
+              )
+
+          # Do not factory-reboot: that detaches cpu-basic and the factory
+          # then BUILD_ERRORs with git exit 128. A normal restart rebuilds
+          # the already-published COPY set on attached hardware.
+          runtime = api.restart_space(repo_id=repo, factory_reboot=False)
           stage = getattr(runtime, "stage", runtime)
-          print(f"factory reboot requested for {repo}@{sha}; stage {stage!r}")
+          print(f"restart requested for {repo}@{sha}; hardware={hardware!r} stage={stage!r}")
           PY
 
       - name: Attest exact running commit, bytes, and smoke routes
