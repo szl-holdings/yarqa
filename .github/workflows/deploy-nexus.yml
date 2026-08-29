@@ -163,10 +163,47 @@ jobs:
           manifest["hf_commit_oid"] = sha
           manifest["pruned_unmanaged"] = sorted(leftover & live)
           json.dump(manifest, open("hf-deploy-manifest.json", "w"), indent=2, sort_keys=True)
+          try:
+              api.request_space_hardware(repo_id=repo, hardware="cpu-basic")
+              print("requested cpu-basic hardware")
+          except Exception as exc:
+              print(f"hardware request skipped: {type(exc).__name__}: {exc}")
           runtime = api.restart_space(repo_id=repo, factory_reboot=True)
           stage = getattr(runtime, "stage", runtime)
           print(f"factory reboot requested for {repo}@{sha}; stage {stage!r}")
           PY
+
+      - name: Dump Space factory logs on failure
+        if: failure()
+        env:
+          HF_REPO: SZLHOLDINGS/nexus
+        run: |
+          "$RUNNER_TEMP/hf-publisher-venv/bin/python" -I -P - <<'PY'
+          import os
+          import urllib.error
+          import urllib.request
+
+          repo = os.environ["HF_REPO"]
+          token = os.environ["HF_TOKEN"]
+          headers = {"Authorization": f"Bearer {token}", "User-Agent": "nexus-deploy/1.0"}
+          for path in (
+              f"https://huggingface.co/api/spaces/{repo}",
+              f"https://huggingface.co/api/spaces/{repo}/logs",
+              f"https://huggingface.co/api/spaces/{repo}/logs/error",
+          ):
+              req = urllib.request.Request(path, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      body = resp.read()[:8000]
+                      print(f"=== {path} HTTP {resp.status} ===")
+                      print(body.decode("utf-8", "replace"))
+              except urllib.error.HTTPError as exc:
+                  print(f"=== {path} HTTP {exc.code} ===")
+                  print(exc.read()[:2000].decode("utf-8", "replace"))
+              except Exception as exc:
+                  print(f"=== {path} {type(exc).__name__}: {exc}")
+          PY
+
 
 
       - name: Attest exact running commit, bytes, and smoke routes
