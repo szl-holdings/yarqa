@@ -11,7 +11,7 @@ def contract_errors(text: str) -> list[str]:
     errors: list[str] = []
     required_exactly_once = {
         '- ".github/workflows/hf-deploy.yml"': "the workflow must trigger its own protected-main deployment",
-        "reusable-hf-deploy.yml@5a4c781502417fd0c4162514b2972a5852ae9fab": "deployment must use bounded post-restart source convergence",
+        "reusable-hf-deploy.yml@86c4e95fdceedfb1e7e226ad3c8f5f844bd2aae4": "deployment must use canonical bounded source probes",
         "      restart-space: true": "the Space must restart after publication",
         "      wait-running: 1200": "the deployer must wait for a stable runtime",
         "      smoke-paths: '[\"/\",\"/healthz\",\"/api/build-info\"]'": "root, health, and source identity must all be smoked",
