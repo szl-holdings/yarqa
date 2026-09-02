@@ -22,9 +22,9 @@ name: Deploy to HuggingFace Space
 # Requires org/repo secret HF_TOKEN (HF write token, org write to SZLHOLDINGS),
 # passed via `secrets: inherit`. The deployer FAILS LOUDLY if it is absent.
 #
-# Runtime identity is verified only after a real Space restart. The prior
-# deployment published exact bytes but skipped restart, leaving /api/build-info
-# on the old process and correctly failing source identity verification.
+# Runtime identity is verified only after a real Space restart. The controller
+# retries transient post-restart Hugging Face route swaps for a bounded 180
+# seconds, but never accepts a stale or mismatched source revision.
 
 on:
   push:
@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@3dde396da0b2c17722e8b78e9da34057801dce5d
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@5a4c781502417fd0c4162514b2972a5852ae9fab
     secrets: inherit
     with:
       hf-repo: SZLHOLDINGS/yarqa
