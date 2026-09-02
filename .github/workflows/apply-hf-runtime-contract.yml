@@ -1,0 +1,53 @@
+name: Apply YARQA HF runtime contract
+
+on:
+  push:
+    branches:
+      - fix/hf-runtime-restart-and-attestation
+    paths:
+      - .github/workflows/apply-hf-runtime-contract.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/hf-runtime-restart-and-attestation
+          fetch-depth: 0
+      - name: Refresh the locked deployment-workflow digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          workflow = Path('.github/workflows/hf-deploy.yml')
+          tests = Path('tests/test_space_ci_dependency_contract.py')
+          expected = hashlib.sha256(workflow.read_bytes()).hexdigest()
+          text = tests.read_text(encoding='utf-8')
+          old = 'EXPECTED_HF_DEPLOY_SHA256 = "daf5935570e35191df980f92e6c78d7e76e68376dde8585ecbae95edac9f8711"'
+          new = f'EXPECTED_HF_DEPLOY_SHA256 = "{expected}"'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one old HF deploy digest, found {text.count(old)}')
+          tests.write_text(text.replace(old, new), encoding='utf-8', newline='\n')
+          print(f'hf-deploy sha256={expected}')
+          PY
+      - name: Verify the existing dependency contract
+        run: python3 -m unittest -v tests.test_space_ci_dependency_contract
+      - name: Commit the digest and remove this one-shot controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-hf-runtime-contract.yml
+          git config user.name "SZL YARQA Runtime Controller"
+          git config user.email "stephenlutar2@gmail.com"
+          git add tests/test_space_ci_dependency_contract.py .github/workflows/apply-hf-runtime-contract.yml
+          git commit -s -m "test(hf): relock the YARQA deploy contract"
+          git push origin HEAD:fix/hf-runtime-restart-and-attestation
