@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@5a4c781502417fd0c4162514b2972a5852ae9fab
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@86c4e95fdceedfb1e7e226ad3c8f5f844bd2aae4
     secrets: inherit
     with:
       hf-repo: SZLHOLDINGS/yarqa
