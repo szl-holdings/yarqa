@@ -1,0 +1,67 @@
+name: Apply YARQA canonical probe digest
+
+on:
+  push:
+    branches:
+      - fix/hf-canonical-probe-controller
+    paths:
+      - .github/workflows/apply-hf-canonical-probe-digest.yml
+
+permissions:
+  contents: write
+
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/hf-canonical-probe-controller
+          fetch-depth: 0
+      - name: Recompute the exact deployment workflow digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import runpy
+
+          workflow_path = Path('.github/workflows/hf-deploy.yml')
+          lock_path = Path('tests/test_space_ci_dependency_contract.py')
+          runtime_contract_path = Path('tests/test_hf_deploy_runtime_contract.py')
+
+          expected = hashlib.sha256(workflow_path.read_bytes()).hexdigest()
+          if expected != '85b0d814ff0e3c6a8aac299260a9d89c569e6bc05f461b2e140e3c9bd13938bf':
+              raise SystemExit(f'unexpected canonical workflow digest: {expected}')
+
+          text = lock_path.read_text(encoding='utf-8')
+          old = 'EXPECTED_HF_DEPLOY_SHA256 = "5a9d82bb17f6aa7d09e0ef10dd965f13915099521879c05e791032f485222234"'
+          new = f'EXPECTED_HF_DEPLOY_SHA256 = "{expected}"'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one previous workflow digest, found {text.count(old)}')
+          lock_path.write_text(text.replace(old, new), encoding='utf-8', newline='\n')
+
+          namespace = runpy.run_path(str(runtime_contract_path))
+          errors = namespace['contract_errors'](workflow_path.read_text(encoding='utf-8'))
+          if errors:
+              raise SystemExit(f'runtime deployment contract failed: {errors}')
+          print(f'hf-deploy sha256={expected}')
+          PY
+      - name: Verify the existing dependency and diff contracts
+        run: |
+          python3 -m unittest -v tests.test_space_ci_dependency_contract
+          python3 -m py_compile tests/test_hf_deploy_runtime_contract.py
+          git diff --check
+      - name: Commit the relock and remove this one-shot controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-hf-canonical-probe-digest.yml
+          git config user.name "SZL YARQA Canonical Probe Controller"
+          git config user.email "stephenlutar2@gmail.com"
+          git add tests/test_space_ci_dependency_contract.py .github/workflows/apply-hf-canonical-probe-digest.yml
+          git commit -s -m "test(hf): relock canonical probe deployment bytes"
+          git push origin HEAD:fix/hf-canonical-probe-controller
