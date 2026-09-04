@@ -1,0 +1,44 @@
+# Copyright 2026 SZL Holdings - SPDX-License-Identifier: Apache-2.0
+name: Deploy YARQA to creator profile
+
+# YARQA is a creative governed-knowledge experience. GitHub remains the source
+# of truth, while the runnable Space belongs on Stephen's public profile rather
+# than in the flagship/vertical-only SZLHOLDINGS organization.
+#
+# The deployment set is derived from space/Dockerfile COPY sources
+# (pyproject.toml + yarqa/ + space/) and attested live-vs-git after rebuild.
+# include-readme=false preserves the Space-specific Hugging Face card.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hf-deploy.yml"
+      - "space/**"
+      - "yarqa/**"
+      - "pyproject.toml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hf-deploy-yarqa-creator-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@86c4e95fdceedfb1e7e226ad3c8f5f844bd2aae4
+    secrets: inherit
+    with:
+      hf-repo: betterwithage/yarqa
+      ref: ${{ github.sha }}
+      dockerfile-path: space/Dockerfile
+      include-readme: false
+      prune: true
+      restart-space: true
+      wait-running: 1200
+      smoke-paths: '["/","/healthz","/api/build-info"]'
+      require-default-branch-tip: true
+      source-revision-variable: SZL_GIT_SHA
+      source-revision-probe-path: /api/build-info
