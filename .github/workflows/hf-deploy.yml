@@ -1,30 +1,13 @@
 # Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
-name: Deploy to HuggingFace Space
+name: Deploy YARQA to creator profile
 
-# Thin caller for the canonical org deployer, replacing the hand-rolled
-# upload_folder hf-sync.yml. The file set pushed to the live Space
-# (SZLHOLDINGS/yarqa) is DERIVED from the Space build Dockerfile's per-file/dir
-# COPY sources (pyproject.toml + yarqa/ + space/), then attested live-vs-git
-# (sha256) after the Space rebuilds. This derives the exact same payload the old
-# allow-list sync mirrored, with no hand-maintained list to drift.
+# YARQA is a creative governed-knowledge experience. GitHub remains the source
+# of truth, while the runnable Space belongs on Stephen's public profile rather
+# than in the flagship/vertical-only SZLHOLDINGS organization.
 #
-# dockerfile-path = space/Dockerfile: this repo has NO root Dockerfile. The live
-# Space's build Dockerfile lives at the SPACE root and is byte-identical to this
-# repo's space/Dockerfile, whose COPY sources (pyproject.toml, yarqa, space)
-# resolve against the repo root. include-readme = false: the repo root README is
-# the GitHub project card (no HF front-matter); the Space's own front-matter card
-# README lives only on the Space and must not be clobbered (matches the prior
-# sync, which never touched it).
-#
-# The reusable publisher is bound to the canonical immutable org release commit;
-# it checks out its own exact tools revision and installs the shared hash lock.
-#
-# Requires org/repo secret HF_TOKEN (HF write token, org write to SZLHOLDINGS),
-# passed via `secrets: inherit`. The deployer FAILS LOUDLY if it is absent.
-#
-# Runtime identity is verified only after a real Space restart. The controller
-# retries transient post-restart Hugging Face route swaps for a bounded 180
-# seconds, but never accepts a stale or mismatched source revision.
+# The deployment set is derived from space/Dockerfile COPY sources
+# (pyproject.toml + yarqa/ + space/) and attested live-vs-git after rebuild.
+# include-readme=false preserves the Space-specific Hugging Face card.
 
 on:
   push:
@@ -40,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hf-deploy-${{ github.ref }}
+  group: hf-deploy-yarqa-creator-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -48,7 +31,7 @@ jobs:
     uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@86c4e95fdceedfb1e7e226ad3c8f5f844bd2aae4
     secrets: inherit
     with:
-      hf-repo: SZLHOLDINGS/yarqa
+      hf-repo: betterwithage/yarqa
       ref: ${{ github.sha }}
       dockerfile-path: space/Dockerfile
       include-readme: false
