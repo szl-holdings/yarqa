@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Reconcile Yarqa Python locks once
+
+on:
+  push:
+    branches:
+      - dependabot/pip/python-56af6446ba
+    paths:
+      - .github/workflows/_reconcile_python_locks_once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yarqa-python-lock-reconcile-20260907
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == 'szl-holdings/yarqa' && github.ref == 'refs/heads/dependabot/pip/python-56af6446ba'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Check out exact dependency branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dependabot/pip/python-56af6446ba
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Regenerate exact hashed production and CI locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=dependabot/pip/python-56af6446ba
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote origin refs/heads/$branch | cut -f1)" = "$GITHUB_SHA"
+
+          python -m pip install --disable-pip-version-check --no-cache-dir 'uv==0.8.22'
+
+          uv pip compile \
+            --python-version 3.11 \
+            --python-platform x86_64-manylinux2014 \
+            --generate-hashes \
+            --no-strip-extras \
+            --output-file space/requirements.lock \
+            --upgrade-package pydantic \
+            pyproject.toml space/requirements.txt
+
+          uv pip compile \
+            --extra test \
+            --python-version 3.11 \
+            --python-platform x86_64-manylinux2014 \
+            --generate-hashes \
+            --no-strip-extras \
+            --output-file .github/requirements/space-ci.lock \
+            --upgrade-package pytest \
+            --upgrade-package pydantic \
+            pyproject.toml space/requirements.lock
+
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import re
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/space-ci.yml')
+          test_path = Path('tests/test_space_ci_dependency_contract.py')
+          production_lock = Path('space/requirements.lock').read_text(encoding='utf-8')
+          ci_lock = Path('.github/requirements/space-ci.lock').read_text(encoding='utf-8')
+
+          version_re = re.compile(r'(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)')
+          def versions(text: str) -> dict[str, str]:
+              return {
+                  name.lower().replace('_', '-'): version
+                  for name, version in version_re.findall(text)
+              }
+
+          production = versions(production_lock)
+          ci = versions(ci_lock)
+          expected = {
+              'pytest': '9.1.1',
+              'pydantic': '2.13.5',
+              'pydantic-core': '2.46.5',
+          }
+          observed = {name: ci.get(name) for name in expected}
+          if observed != expected:
+              raise SystemExit(f'CI lock resolution drift: expected={expected} observed={observed}')
+          if production.get('pydantic') != '2.13.5' or production.get('pydantic-core') != '2.46.5':
+              raise SystemExit(
+                  'production lock did not resolve pydantic 2.13.5 / pydantic-core 2.46.5: '
+                  f"{production.get('pydantic')}, {production.get('pydantic-core')}"
+              )
+
+          workflow = workflow_path.read_text(encoding='utf-8')
+          old_workflow = '"pytest": "8.4.2"'
+          count = workflow.count(old_workflow)
+          if count < 1:
+              raise SystemExit('expected old pytest workflow attestation was not present')
+          workflow = workflow.replace(old_workflow, '"pytest": "9.1.1"')
+          workflow_path.write_text(workflow, encoding='utf-8')
+
+          test_text = test_path.read_text(encoding='utf-8')
+          replacements = {
+              '"pytest": "8.4.2"': '"pytest": "9.1.1"',
+              '"pytest==8.4.2"': '"pytest==9.1.1"',
+          }
+          for old, new in replacements.items():
+              count = test_text.count(old)
+              if count < 1:
+                  raise SystemExit(f'expected dependency contract text missing: {old!r}')
+              test_text = test_text.replace(old, new)
+
+          marker = "      - name: Install, attest, and test the locked graph\n        run: |\n"
+          if workflow.count(marker) != 1:
+              raise SystemExit('locked workflow step marker drifted')
+          start = workflow.index(marker)
+          body_start = start + len(marker)
+          lines = workflow[body_start:].splitlines(keepends=True)
+          body_lines: list[str] = []
+          for line in lines:
+              if line.startswith('      - name:') or (
+                  line and not line.startswith(' ') and line.strip()
+              ):
+                  break
+              body_lines.append(line)
+          body = ''.join(body_lines).rstrip('\n') + '\n'
+          run_sha = hashlib.sha256(body.encode('utf-8')).hexdigest()
+          workflow_sha = hashlib.sha256(workflow.encode('utf-8')).hexdigest()
+
+          test_text, run_replacements = re.subn(
+              r'(?m)^EXPECTED_RUN_SHA256 = "[0-9a-f]{64}"$',
+              f'EXPECTED_RUN_SHA256 = "{run_sha}"',
+              test_text,
+          )
+          test_text, workflow_replacements = re.subn(
+              r'(?m)^EXPECTED_WORKFLOW_SHA256 = "[0-9a-f]{64}"$',
+              f'EXPECTED_WORKFLOW_SHA256 = "{workflow_sha}"',
+              test_text,
+          )
+          if (run_replacements, workflow_replacements) != (1, 1):
+              raise SystemExit(
+                  f'digest constant replacement drift: run={run_replacements} workflow={workflow_replacements}'
+              )
+          test_path.write_text(test_text, encoding='utf-8')
+
+          print(
+              {
+                  'state': 'LOCKS_RECONCILED',
+                  'pytest': ci['pytest'],
+                  'pydantic': ci['pydantic'],
+                  'pydantic_core': ci['pydantic-core'],
+                  'workflow_sha256': workflow_sha,
+                  'run_sha256': run_sha,
+              }
+          )
+          PY
+
+          python -m venv /tmp/yarqa-verify
+          /tmp/yarqa-verify/bin/python -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --require-hashes \
+            --force-reinstall \
+            -r .github/requirements/space-ci.lock
+          /tmp/yarqa-verify/bin/python -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-deps \
+            --no-build-isolation \
+            .
+          /tmp/yarqa-verify/bin/python -m pip check
+          /tmp/yarqa-verify/bin/python -m pytest tests/ -q
+          /tmp/yarqa-verify/bin/python -m pytest space/tests/test_space_endpoints.py -q
+          git diff --check
+
+      - name: Commit permanent dependency repair and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=dependabot/pip/python-56af6446ba
+          test "$(git ls-remote origin refs/heads/$branch | cut -f1)" = "$GITHUB_SHA"
+          git rm -- .github/workflows/_reconcile_python_locks_once.yml
+          git add -- \
+            .github/requirements/space-ci.lock \
+            .github/workflows/space-ci.yml \
+            space/requirements.lock \
+            tests/test_space_ci_dependency_contract.py
+          git diff --cached --check
+          expected=$'.github/requirements/space-ci.lock\n.github/workflows/_reconcile_python_locks_once.yml\n.github/workflows/space-ci.yml\nspace/requirements.lock\ntests/test_space_ci_dependency_contract.py'
+          test "$(git diff --cached --name-only | sort)" = "$expected"
+          git config user.name 'Lutar, Stephen P.'
+          git config user.email 'stephenlutar2@gmail.com'
+          git commit -s -m 'build(deps): reconcile Yarqa Python lock graph'
+          git push origin "HEAD:refs/heads/$branch"
