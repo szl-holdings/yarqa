@@ -81,6 +81,7 @@ jobs:
           ci_lock = Path('.github/requirements/space-ci.lock').read_text(encoding='utf-8')
 
           version_re = re.compile(r'(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)')
+
           def versions(text: str) -> dict[str, str]:
               return {
                   name.lower().replace('_', '-'): version
@@ -96,20 +97,24 @@ jobs:
           }
           observed = {name: ci.get(name) for name in expected}
           if observed != expected:
-              raise SystemExit(f'CI lock resolution drift: expected={expected} observed={observed}')
-          if production.get('pydantic') != '2.13.5' or production.get('pydantic-core') != '2.46.5':
               raise SystemExit(
-                  'production lock did not resolve pydantic 2.13.5 / pydantic-core 2.46.5: '
+                  f'CI lock resolution drift: expected={expected} observed={observed}'
+              )
+          if (
+              production.get('pydantic') != '2.13.5'
+              or production.get('pydantic-core') != '2.46.5'
+          ):
+              raise SystemExit(
+                  'production lock did not resolve pydantic 2.13.5 / '
+                  'pydantic-core 2.46.5: '
                   f"{production.get('pydantic')}, {production.get('pydantic-core')}"
               )
 
           workflow = workflow_path.read_text(encoding='utf-8')
-          old_workflow = '"pytest": "8.4.2"'
-          count = workflow.count(old_workflow)
-          if count < 1:
-              raise SystemExit('expected old pytest workflow attestation was not present')
-          workflow = workflow.replace(old_workflow, '"pytest": "9.1.1"')
-          workflow_path.write_text(workflow, encoding='utf-8')
+          if workflow.count('"pytest": "9.1.1"') < 1:
+              raise SystemExit('Space CI does not attest pytest 9.1.1')
+          if '"pytest": "8.4.2"' in workflow:
+              raise SystemExit('stale pytest 8.4.2 attestation remains in Space CI')
 
           test_text = test_path.read_text(encoding='utf-8')
           replacements = {
@@ -151,7 +156,8 @@ jobs:
           )
           if (run_replacements, workflow_replacements) != (1, 1):
               raise SystemExit(
-                  f'digest constant replacement drift: run={run_replacements} workflow={workflow_replacements}'
+                  'digest constant replacement drift: '
+                  f'run={run_replacements} workflow={workflow_replacements}'
               )
           test_path.write_text(test_text, encoding='utf-8')
 
@@ -185,20 +191,18 @@ jobs:
           /tmp/yarqa-verify/bin/python -m pytest space/tests/test_space_endpoints.py -q
           git diff --check
 
-      - name: Commit permanent dependency repair and self-remove
+      - name: Commit permanent dependency repair
         shell: bash
         run: |
           set -euo pipefail
           branch=dependabot/pip/python-56af6446ba
           test "$(git ls-remote origin refs/heads/$branch | cut -f1)" = "$GITHUB_SHA"
-          git rm -- .github/workflows/_reconcile_python_locks_once.yml
           git add -- \
             .github/requirements/space-ci.lock \
-            .github/workflows/space-ci.yml \
             space/requirements.lock \
             tests/test_space_ci_dependency_contract.py
           git diff --cached --check
-          expected=$'.github/requirements/space-ci.lock\n.github/workflows/_reconcile_python_locks_once.yml\n.github/workflows/space-ci.yml\nspace/requirements.lock\ntests/test_space_ci_dependency_contract.py'
+          expected=$'.github/requirements/space-ci.lock\nspace/requirements.lock\ntests/test_space_ci_dependency_contract.py'
           test "$(git diff --cached --name-only | sort)" = "$expected"
           git config user.name 'Lutar, Stephen P.'
           git config user.email 'stephenlutar2@gmail.com'
