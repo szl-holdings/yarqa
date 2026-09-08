@@ -1,77 +1,26 @@
-"""Fail-closed contract for YARQA's governed Hugging Face deployment."""
+"""Fail-closed contract for YARQA's consolidated Command Lab runtime."""
 from __future__ import annotations
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "hf-deploy.yml"
+COMMAND_LAB_ROUTE = "https://szlholdings-szl-command-lab.hf.space/api/yarqa"
 
 
-def contract_errors(text: str) -> list[str]:
-    errors: list[str] = []
-    required_exactly_once = {
-        '- ".github/workflows/hf-deploy.yml"': "the workflow must trigger its own protected-main deployment",
-        "reusable-hf-deploy.yml@86c4e95fdceedfb1e7e226ad3c8f5f844bd2aae4": "deployment must use canonical bounded source probes",
-        "      restart-space: true": "the Space must restart after publication",
-        "      wait-running: 1200": "the deployer must wait for a stable runtime",
-        "      smoke-paths: '[\"/\",\"/healthz\",\"/api/build-info\"]'": "root, health, and source identity must all be smoked",
-        "      source-revision-variable: SZL_GIT_SHA": "the deployed source SHA must be bound into the Space",
-        "      source-revision-probe-path: /api/build-info": "the served source identity must be read back",
-        "      require-default-branch-tip: true": "only exact protected main may deploy",
-    }
-    for token, message in required_exactly_once.items():
-        if text.count(token) != 1:
-            errors.append(message)
-
-    forbidden = {
-        "      restart-space: false": "restart cannot be disabled",
-        "      wait-running: 0": "runtime waiting cannot be disabled",
-        "      source-revision-probe-path: /healthz": "health reachability cannot substitute for source identity",
-    }
-    for token, message in forbidden.items():
-        if token in text:
-            errors.append(message)
-
-    if text.find("restart-space: true") > text.find("source-revision-probe-path: /api/build-info"):
-        errors.append("restart admission must be declared before source readback")
-    return errors
-
-
-def test_committed_deployment_contract_passes() -> None:
-    assert contract_errors(WORKFLOW.read_text(encoding="utf-8")) == []
-
-
-def test_disabling_restart_fails_closed() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8").replace(
-        "      restart-space: true", "      restart-space: false", 1
+def test_standalone_hugging_face_publisher_is_retired() -> None:
+    assert not WORKFLOW.exists()
+    workflow_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
     )
-    errors = contract_errors(text)
-    assert "the Space must restart after publication" in errors
-    assert "restart cannot be disabled" in errors
+    assert "SZLHOLDINGS/yarqa" not in workflow_text
 
 
-def test_omitting_health_or_source_smoke_fails_closed() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8").replace(
-        "      smoke-paths: '[\"/\",\"/healthz\",\"/api/build-info\"]'",
-        "      smoke-paths: '[\"/\"]'",
-        1,
-    )
-    assert "root, health, and source identity must all be smoked" in contract_errors(text)
-
-
-def test_removing_self_trigger_fails_closed() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8").replace(
-        '      - ".github/workflows/hf-deploy.yml"\n', "", 1
-    )
-    assert "the workflow must trigger its own protected-main deployment" in contract_errors(text)
-
-
-def test_health_cannot_replace_exact_source_readback() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8").replace(
-        "      source-revision-probe-path: /api/build-info",
-        "      source-revision-probe-path: /healthz",
-        1,
-    )
-    errors = contract_errors(text)
-    assert "the served source identity must be read back" in errors
-    assert "health reachability cannot substitute for source identity" in errors
+def test_readme_names_the_canonical_runtime_and_truth_boundary() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized = " ".join(readme.split())
+    assert COMMAND_LAB_ROUTE in readme
+    assert "There is no standalone `SZLHOLDINGS/yarqa` Space" in normalized
+    assert "integrity and reproducibility" in readme
+    assert "not CFD correctness" in readme

@@ -19,6 +19,19 @@ pip install numpy
 # then add this package to your path / install -e .
 ```
 
+## Operational runtime
+
+The retained public runtime is the namespaced YARQA route in SZL Command Lab:
+
+<https://szlholdings-szl-command-lab.hf.space/api/yarqa>
+
+Command Lab pins an exact commit from this repository, executes a bounded
+synthetic compartmentalization, emits a replayable receipt, and verifies that
+receipt before returning `READY`. There is no standalone `SZLHOLDINGS/yarqa`
+Space. The route demonstrates integrity and reproducibility for its disclosed
+synthetic input; it is not CFD correctness, validation for a customer mesh, or
+authorization for an external action.
+
 ## Use
 ```python
 import numpy as np
