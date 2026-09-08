@@ -15,7 +15,9 @@ except ModuleNotFoundError:  # pragma: no cover - hosted contract runs on Python
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "space-ci.yml"
-HF_DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "hf-deploy.yml"
+RETIRED_HF_DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "hf-deploy.yml"
+README = ROOT / "README.md"
+COMMAND_LAB_ROUTE = "https://szlholdings-szl-command-lab.hf.space/api/yarqa"
 CI_LOCK = ROOT / ".github" / "requirements" / "space-ci.lock"
 PRODUCTION_LOCK = ROOT / "space" / "requirements.lock"
 PRODUCTION_REQUIREMENTS = ROOT / "space" / "requirements.txt"
@@ -26,7 +28,6 @@ PACKAGE_INIT = ROOT / "yarqa" / "__init__.py"
 STEP_NAME = "Install, attest, and test the locked graph"
 EXPECTED_RUN_SHA256 = "e6d111e0d857d976aee64f243ff11a79f78c36de94153aa8d30022380d4009ae"
 EXPECTED_WORKFLOW_SHA256 = "4c9c9175fc205a7013bc5475c75748455dbfa09b822265479947c0a1ee76a710"
-EXPECTED_HF_DEPLOY_SHA256 = "85b0d814ff0e3c6a8aac299260a9d89c569e6bc05f461b2e140e3c9bd13938bf"
 EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
 
 PACKAGE_INSTALL = re.compile(
@@ -292,15 +293,19 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         self.assertNotIn("--no-build-isolation -e .", dockerfile)
         self.assertNotIn("chown -R yarqa:yarqa /app", dockerfile)
 
-    def test_hf_deploy_prunes_deleted_managed_copy_sources(self) -> None:
-        workflow = HF_DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(
-            EXPECTED_HF_DEPLOY_SHA256,
-            hashlib.sha256(workflow.encode("utf-8")).hexdigest(),
-        )
-        self.assertEqual(1, workflow.count("      prune: true\n"))
-        self.assertEqual(1, workflow.count("      include-readme: false\n"))
-        self.assertEqual(1, workflow.count("      dockerfile-path: space/Dockerfile\n"))
+    def test_standalone_hf_publisher_is_retired_without_a_second_writer(self) -> None:
+        self.assertFalse(RETIRED_HF_DEPLOY_WORKFLOW.exists())
+
+        publisher_workflows = []
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            if "hf-repo: SZLHOLDINGS/yarqa" in text:
+                publisher_workflows.append(path.name)
+        self.assertEqual([], publisher_workflows)
+
+        readme = " ".join(README.read_text(encoding="utf-8").split())
+        self.assertIn(COMMAND_LAB_ROUTE, readme)
+        self.assertIn("There is no standalone `SZLHOLDINGS/yarqa` Space", readme)
 
 
 if __name__ == "__main__":
