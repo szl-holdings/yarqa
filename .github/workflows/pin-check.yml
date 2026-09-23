@@ -3,13 +3,13 @@ name: Pin Check
 # Thin caller — delegates to the org-wide reusable SHA-pin check so this repo's
 # workflow files are validated identically to every other repo. The reusable is
 # pinned by commit SHA (the rule it enforces).
-
+# This is a required check: every PR and default-branch push must produce it.
 on:
   push:
     branches: [main, master]
-    paths: ['.github/workflows/**']
   pull_request:
-    paths: ['.github/workflows/**']
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
