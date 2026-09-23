@@ -1,155 +1,133 @@
 # SPDX-License-Identifier: Apache-2.0
-# Read-only replacement for the retired branch-specific lock pusher.
-# Produces review material only; never commits, publishes, or certifies a release.
-name: Resolve Yarqa Python lock candidate
-
+# One candidate-only object materialization, using independently checked resolver bytes.
+# No commit, ref, default branch, publisher, model or runtime write is performed.
+name: Materialize reviewed Yarqa lock objects
 on:
   pull_request:
     branches: [main]
     paths:
       - .github/workflows/_reconcile_python_locks_once.yml
-      - pyproject.toml
-      - space/requirements.txt
-      - space/requirements.lock
-      - .github/requirements/space-ci.lock
-
 permissions:
   contents: read
-
 concurrency:
-  group: yarqa-lock-candidate-${{ github.event.pull_request.number }}
+  group: yarqa-reviewed-lock-objects-${{ github.event.pull_request.number }}
   cancel-in-progress: false
-
 jobs:
-  resolve:
+  objects:
     if: github.repository == 'szl-holdings/yarqa' && github.event.pull_request.number == 65 && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - name: Check out exact candidate without persistent credentials
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.SOURCE_SHA }}
-          persist-credentials: false
-          fetch-depth: 1
-      - name: Set up matching Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.11'
-      - name: Capture exact inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib, json, os, re, shutil
-          root = Path("lock-candidate")
-          (root / "before").mkdir(parents=True, exist_ok=True)
-          inputs = ["pyproject.toml", "space/requirements.txt", "space/requirements.lock", ".github/requirements/space-ci.lock"]
-          manifest = {"schema": "szl.python-lock-candidate/v1", "source_sha": os.environ["SOURCE_SHA"], "base_sha": os.environ["BASE_SHA"], "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"], "state": "INPUTS_CAPTURED", "compiler": "uv==0.8.22", "python_version": "3.11", "platform": "x86_64-manylinux2014", "requested_upgrade": "uvicorn==0.53.0", "inputs_sha256": {}}
-          if not re.fullmatch(r"[0-9a-f]{40}", manifest["source_sha"]):
-              raise SystemExit("invalid source identity")
-          for name in inputs:
-              manifest["inputs_sha256"][name] = hashlib.sha256(Path(name).read_bytes()).hexdigest()
-          shutil.copyfile("space/requirements.lock", root / "before/runtime.lock")
-          shutil.copyfile(".github/requirements/space-ci.lock", root / "before/test.lock")
-          (root / "resolution.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-          PY
-      - name: Generate hashed candidate with the existing compiler version
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m venv .resolver-venv
-          .resolver-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir 'uv==0.8.22'
-          .resolver-venv/bin/uv --version > lock-candidate/compiler-version.txt
-          .resolver-venv/bin/uv pip compile \
-            --python-version 3.11 --python-platform x86_64-manylinux2014 \
-            --generate-hashes --no-strip-extras \
-            --output-file space/requirements.lock \
-            --upgrade-package 'uvicorn==0.53.0' \
-            pyproject.toml space/requirements.txt
-          .resolver-venv/bin/uv pip compile \
-            --extra test --python-version 3.11 --python-platform x86_64-manylinux2014 \
-            --generate-hashes --no-strip-extras \
-            --output-file .github/requirements/space-ci.lock \
-            --upgrade-package 'uvicorn==0.53.0' \
-            pyproject.toml space/requirements.lock
-      - name: Reject unrequested graph changes and bind output hashes
+      - name: Materialize exactly two verified Git objects without moving a ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          from pathlib import Path
-          import hashlib, json, re, shutil
-          root = Path("lock-candidate")
-          pattern = re.compile(r"(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)")
-          def entries(path):
-              text = Path(path).read_text(encoding="utf-8")
-              matches = list(pattern.finditer(text))
-              if not matches:
-                  raise ValueError(f"no exact pins in {path}")
-              result = {}
-              for index, match in enumerate(matches):
-                  end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-                  name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
-                  hashes = sorted(set(re.findall(r"--hash=sha256:([0-9a-f]{64})", text[match.start():end])))
-                  if name in result or not hashes:
-                      raise ValueError(f"ambiguous or unhashed lock entry {name}")
-                  result[name] = {"version": match.group(2), "hashes": hashes}
-              return result
-          production = entries("space/requirements.lock")
-          test = entries(".github/requirements/space-ci.lock")
-          for current, old in ((production, entries(root / "before/runtime.lock")), (test, entries(root / "before/test.lock"))):
-              if set(current) != set(old):
-                  raise SystemExit("dependency membership changed; separate review required")
-              changed = {name for name in current if current[name]["version"] != old[name]["version"]}
-              if changed - {"uvicorn"} or current["uvicorn"]["version"] != "0.53.0":
-                  raise SystemExit(f"unexpected dependency version changes: {sorted(changed)}")
-              for name in current:
-                  if name != "uvicorn" and current[name] != old[name]:
-                      raise SystemExit(f"unrelated distribution hashes changed for {name}; review required")
-          for name, record in production.items():
-              if test.get(name) != record:
-                  raise SystemExit(f"production/test lock mismatch: {name}")
-          shutil.copyfile("space/requirements.lock", root / "requirements.lock")
-          shutil.copyfile(".github/requirements/space-ci.lock", root / "space-ci.lock")
-          manifest = json.loads((root / "resolution.json").read_text(encoding="utf-8"))
-          manifest.update(state="RESOLVED_CANDIDATE_ONLY", outputs_sha256={name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("requirements.lock", "space-ci.lock")}, versions={"runtime": {key: value["version"] for key, value in production.items()}, "test": {key: value["version"] for key, value in test.items()}}, runtime_pin_count=len(production), test_pin_count=len(test), repository_write_performed=False, source_tests_qualified=False, container_qualified=False, release_authorized=False)
-          (root / "resolution.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-          print(json.dumps({"state": manifest["state"], "source_sha": manifest["source_sha"], "uvicorn": production["uvicorn"]["version"], "runtime_pin_count": len(production), "test_pin_count": len(test)}))
-          PY
-          git diff -- space/requirements.lock .github/requirements/space-ci.lock > lock-candidate/generated-locks.patch
-      - name: Verify hash-required candidate installation without claiming source admission
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m venv .candidate-venv
-          .candidate-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir --require-hashes --force-reinstall -r lock-candidate/space-ci.lock
-          .candidate-venv/bin/python -m pip check
-          .candidate-venv/bin/python -I - <<'PY'
-          from importlib.metadata import version
-          from pathlib import Path
+          """Materialize two already-reviewed lock blobs; never update a commit or ref."""
+          from __future__ import annotations
+          import base64
+          import hashlib
           import json
-          assert version("uvicorn") == "0.53.0", "candidate install selected wrong Uvicorn"
-          path = Path("lock-candidate/resolution.json")
-          manifest = json.loads(path.read_text(encoding="utf-8"))
-          manifest["hashed_test_lock_install"] = "SUCCESS"
-          manifest["state"] = "RESOLVED_AND_INSTALLABLE_CANDIDATE_ONLY"
-          path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          import os
+          from pathlib import Path
+          import urllib.request
+
+          REPO = "szl-holdings/yarqa"
+          SOURCE = "e35cc233ab77b88b33336b4f3dd65087b5216c70"
+          ARTIFACT_SHA256 = "ebc705c05d66918e19f6e3ba6eea4f859ce4f2499b4cd54ee66256ef178fb386"
+          OLD = ("uvicorn[standard]==0.52.4 \\\n"
+                 "    --hash=sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86 \\\n"
+                 "    --hash=sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1")
+          NEW = ("uvicorn[standard]==0.53.0 \\\n"
+                 "    --hash=sha256:a9356f0cb89b3b8621529c5d5eebd69bfe154f4c3f68b4cf2de47e45fa855c2e \\\n"
+                 "    --hash=sha256:e8dca71ec86dce5f04e333f0d56cdedf942446e6643b9cea1af0d6d3a02cb03e")
+          SPECS = {
+              "space/requirements.lock": {
+                  "old_git": "6d90ee1184864a81370e63b1f9a1fcab6d478de8",
+                  "old_sha256": "d752e4cad878af8a0aa02dae0832ef7b40a0f9b610a13aa35ac5ad18f65371e1",
+                  "new_sha256": "31b749b7fa78035a20dc20b2988e964c9c9d1e5e6fce883ee87416f76f664672",
+              },
+              ".github/requirements/space-ci.lock": {
+                  "old_git": "c56da7f9aa1776aa525bb00807678037a4431b9d",
+                  "old_sha256": "1213f1cd52d77e1de151d35fd17fa5c94b701747e7d4bb14926b54e08e5786db",
+                  "new_sha256": "98c358d31fc6e450cb8d045b8874906cea010e74b0e266d056847996e5a1811b",
+              },
+          }
+
+          def git_blob_sha(data: bytes) -> str:
+              return hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+
+          def reviewed_candidate(data: bytes, spec: dict[str, str]) -> bytes:
+              if len(data) > 100_000 or git_blob_sha(data) != spec["old_git"]:
+                  raise ValueError("input Git blob mismatch")
+              if hashlib.sha256(data).hexdigest() != spec["old_sha256"]:
+                  raise ValueError("input SHA256 mismatch")
+              text = data.decode("utf-8", errors="strict")
+              if text.count(OLD) != 1:
+                  raise ValueError("expected exact previous lock record once")
+              result = text.replace(OLD, NEW, 1).encode("utf-8")
+              if hashlib.sha256(result).hexdigest() != spec["new_sha256"]:
+                  raise ValueError("candidate differs from verified resolver artifact")
+              return result
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise ValueError("unexpected GitHub API redirect")
+
+          def main() -> None:
+              token = os.environ["GH_TOKEN"]
+              opener = urllib.request.build_opener(NoRedirect())
+              def api(suffix: str, payload: dict | None = None) -> dict:
+                  request = urllib.request.Request(
+                      f"https://api.github.com/repos/{REPO}/{suffix}",
+                      data=None if payload is None else json.dumps(payload).encode("utf-8"),
+                      headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"},
+                      method="GET" if payload is None else "POST",
+                  )
+                  with opener.open(request, timeout=30) as response:
+                      data = response.read(2_000_001)
+                  if len(data) > 2_000_000:
+                      raise ValueError("oversized API response")
+                  result = json.loads(data)
+                  if not isinstance(result, dict):
+                      raise ValueError("unexpected API response type")
+                  return result
+              pr = api("pulls/65")
+              if pr.get("state") != "open" or pr.get("draft") is not True or pr["head"]["sha"] != os.environ["SOURCE_SHA"]:
+                  raise ValueError("candidate moved or is no longer an open draft")
+              output = {"schema": "szl.reviewed-lock-git-objects/v1", "resolver_source_sha": SOURCE, "resolver_artifact_id": 10727937220, "resolver_artifact_sha256": ARTIFACT_SHA256, "materializer_source_sha": os.environ["SOURCE_SHA"], "ref_updates": 0, "commit_creations": 0, "blobs": {}}
+              prepared = {}
+              for path, spec in SPECS.items():
+                  blob = api(f"git/blobs/{spec['old_git']}")
+                  if blob.get("sha") != spec["old_git"] or blob.get("encoding") != "base64":
+                      raise ValueError("invalid source blob response")
+                  data = base64.b64decode("".join(blob["content"].split()), validate=True)
+                  if blob.get("size") != len(data):
+                      raise ValueError("source blob size mismatch")
+                  prepared[path] = reviewed_candidate(data, spec)
+              # Only the two SHA-bound immutable objects are written. No refs/commits API.
+              for path, data in prepared.items():
+                  result = api("git/blobs", {"encoding": "base64", "content": base64.b64encode(data).decode("ascii")})
+                  expected_git = git_blob_sha(data)
+                  if result.get("sha") != expected_git:
+                      raise ValueError("written Git object differs from candidate")
+                  output["blobs"][path] = {"git_sha": expected_git, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+              target = Path("reviewed-lock-objects.json")
+              target.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")
+              print(json.dumps(output, indent=2))
+
+          if __name__ == "__main__":
+              main()
           PY
-      - name: Upload immutable candidate evidence
-        if: always()
+      - name: Retain source and object binding
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: yarqa-lock-candidate-${{ env.SOURCE_SHA }}-${{ github.run_attempt }}
-          path: lock-candidate/
+          name: reviewed-yarqa-lock-objects-${{ github.event.pull_request.head.sha }}
+          path: reviewed-lock-objects.json
           if-no-files-found: error
           retention-days: 7
