@@ -1,210 +1,155 @@
 # SPDX-License-Identifier: Apache-2.0
-name: Reconcile Yarqa Python locks once
+# Read-only replacement for the retired branch-specific lock pusher.
+# Produces review material only; never commits, publishes, or certifies a release.
+name: Resolve Yarqa Python lock candidate
 
 on:
-  push:
-    branches:
-      - dependabot/pip/python-56af6446ba
+  pull_request:
+    branches: [main]
     paths:
       - .github/workflows/_reconcile_python_locks_once.yml
+      - pyproject.toml
+      - space/requirements.txt
+      - space/requirements.lock
+      - .github/requirements/space-ci.lock
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: yarqa-python-lock-reconcile-20260907
+  group: yarqa-lock-candidate-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
-  reconcile:
-    if: github.repository == 'szl-holdings/yarqa' && github.ref == 'refs/heads/dependabot/pip/python-56af6446ba'
+  resolve:
+    if: github.repository == 'szl-holdings/yarqa' && github.event.pull_request.number == 65 && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
-
-      - name: Check out exact dependency branch
+      - name: Check out exact candidate without persistent credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: dependabot/pip/python-56af6446ba
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Set up Python 3.11
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up matching Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
-
-      - name: Regenerate exact hashed production and CI locks
+      - name: Capture exact inputs
         shell: bash
         run: |
           set -euo pipefail
-          branch=dependabot/pip/python-56af6446ba
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git ls-remote origin refs/heads/$branch | cut -f1)" = "$GITHUB_SHA"
-
-          python -m pip install --disable-pip-version-check --no-cache-dir 'uv==0.8.22'
-
-          uv pip compile \
-            --python-version 3.11 \
-            --python-platform x86_64-manylinux2014 \
-            --generate-hashes \
-            --no-strip-extras \
-            --output-file space/requirements.lock \
-            --upgrade-package pydantic \
-            pyproject.toml space/requirements.txt
-
-          uv pip compile \
-            --extra test \
-            --python-version 3.11 \
-            --python-platform x86_64-manylinux2014 \
-            --generate-hashes \
-            --no-strip-extras \
-            --output-file .github/requirements/space-ci.lock \
-            --upgrade-package pytest \
-            --upgrade-package pydantic \
-            pyproject.toml space/requirements.lock
-
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           python - <<'PY'
-          from __future__ import annotations
-
-          import hashlib
-          import re
           from pathlib import Path
-
-          workflow_path = Path('.github/workflows/space-ci.yml')
-          test_path = Path('tests/test_space_ci_dependency_contract.py')
-          production_lock = Path('space/requirements.lock').read_text(encoding='utf-8')
-          ci_lock = Path('.github/requirements/space-ci.lock').read_text(encoding='utf-8')
-
-          version_re = re.compile(r'(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)')
-
-          def versions(text: str) -> dict[str, str]:
-              return {
-                  name.lower().replace('_', '-'): version
-                  for name, version in version_re.findall(text)
-              }
-
-          production = versions(production_lock)
-          ci = versions(ci_lock)
-          expected = {
-              'pytest': '9.1.1',
-              'pydantic': '2.13.5',
-              'pydantic-core': '2.46.5',
-          }
-          observed = {name: ci.get(name) for name in expected}
-          if observed != expected:
-              raise SystemExit(
-                  f'CI lock resolution drift: expected={expected} observed={observed}'
-              )
-          if (
-              production.get('pydantic') != '2.13.5'
-              or production.get('pydantic-core') != '2.46.5'
-          ):
-              raise SystemExit(
-                  'production lock did not resolve pydantic 2.13.5 / '
-                  'pydantic-core 2.46.5: '
-                  f"{production.get('pydantic')}, {production.get('pydantic-core')}"
-              )
-
-          workflow = workflow_path.read_text(encoding='utf-8')
-          if workflow.count('"pytest": "9.1.1"') < 1:
-              raise SystemExit('Space CI does not attest pytest 9.1.1')
-          if '"pytest": "8.4.2"' in workflow:
-              raise SystemExit('stale pytest 8.4.2 attestation remains in Space CI')
-
-          test_text = test_path.read_text(encoding='utf-8')
-          replacements = {
-              '"pytest": "8.4.2"': '"pytest": "9.1.1"',
-              '"pytest==8.4.2"': '"pytest==9.1.1"',
-          }
-          for old, new in replacements.items():
-              count = test_text.count(old)
-              if count < 1:
-                  raise SystemExit(f'expected dependency contract text missing: {old!r}')
-              test_text = test_text.replace(old, new)
-
-          marker = "      - name: Install, attest, and test the locked graph\n        run: |\n"
-          if workflow.count(marker) != 1:
-              raise SystemExit('locked workflow step marker drifted')
-          start = workflow.index(marker)
-          body_start = start + len(marker)
-          lines = workflow[body_start:].splitlines(keepends=True)
-          body_lines: list[str] = []
-          for line in lines:
-              if line.startswith('      - name:') or (
-                  line and not line.startswith(' ') and line.strip()
-              ):
-                  break
-              body_lines.append(line)
-          body = ''.join(body_lines).rstrip('\n') + '\n'
-          run_sha = hashlib.sha256(body.encode('utf-8')).hexdigest()
-          workflow_sha = hashlib.sha256(workflow.encode('utf-8')).hexdigest()
-
-          test_text, run_replacements = re.subn(
-              r'(?m)^EXPECTED_RUN_SHA256 = "[0-9a-f]{64}"$',
-              f'EXPECTED_RUN_SHA256 = "{run_sha}"',
-              test_text,
-          )
-          test_text, workflow_replacements = re.subn(
-              r'(?m)^EXPECTED_WORKFLOW_SHA256 = "[0-9a-f]{64}"$',
-              f'EXPECTED_WORKFLOW_SHA256 = "{workflow_sha}"',
-              test_text,
-          )
-          if (run_replacements, workflow_replacements) != (1, 1):
-              raise SystemExit(
-                  'digest constant replacement drift: '
-                  f'run={run_replacements} workflow={workflow_replacements}'
-              )
-          test_path.write_text(test_text, encoding='utf-8')
-
-          print(
-              {
-                  'state': 'LOCKS_RECONCILED',
-                  'pytest': ci['pytest'],
-                  'pydantic': ci['pydantic'],
-                  'pydantic_core': ci['pydantic-core'],
-                  'workflow_sha256': workflow_sha,
-                  'run_sha256': run_sha,
-              }
-          )
+          import hashlib, json, os, re, shutil
+          root = Path("lock-candidate")
+          (root / "before").mkdir(parents=True, exist_ok=True)
+          inputs = ["pyproject.toml", "space/requirements.txt", "space/requirements.lock", ".github/requirements/space-ci.lock"]
+          manifest = {"schema": "szl.python-lock-candidate/v1", "source_sha": os.environ["SOURCE_SHA"], "base_sha": os.environ["BASE_SHA"], "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"], "state": "INPUTS_CAPTURED", "compiler": "uv==0.8.22", "python_version": "3.11", "platform": "x86_64-manylinux2014", "requested_upgrade": "uvicorn==0.53.0", "inputs_sha256": {}}
+          if not re.fullmatch(r"[0-9a-f]{40}", manifest["source_sha"]):
+              raise SystemExit("invalid source identity")
+          for name in inputs:
+              manifest["inputs_sha256"][name] = hashlib.sha256(Path(name).read_bytes()).hexdigest()
+          shutil.copyfile("space/requirements.lock", root / "before/runtime.lock")
+          shutil.copyfile(".github/requirements/space-ci.lock", root / "before/test.lock")
+          (root / "resolution.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
           PY
-
-          python -m venv /tmp/yarqa-verify
-          /tmp/yarqa-verify/bin/python -m pip install \
-            --disable-pip-version-check \
-            --no-cache-dir \
-            --require-hashes \
-            --force-reinstall \
-            -r .github/requirements/space-ci.lock
-          /tmp/yarqa-verify/bin/python -m pip install \
-            --disable-pip-version-check \
-            --no-cache-dir \
-            --no-deps \
-            --no-build-isolation \
-            .
-          /tmp/yarqa-verify/bin/python -m pip check
-          /tmp/yarqa-verify/bin/python -m pytest tests/ -q
-          /tmp/yarqa-verify/bin/python -m pytest space/tests/test_space_endpoints.py -q
-          git diff --check
-
-      - name: Commit permanent dependency repair
+      - name: Generate hashed candidate with the existing compiler version
         shell: bash
         run: |
           set -euo pipefail
-          branch=dependabot/pip/python-56af6446ba
-          test "$(git ls-remote origin refs/heads/$branch | cut -f1)" = "$GITHUB_SHA"
-          git add -- \
-            .github/requirements/space-ci.lock \
-            space/requirements.lock \
-            tests/test_space_ci_dependency_contract.py
-          git diff --cached --check
-          expected=$'.github/requirements/space-ci.lock\nspace/requirements.lock\ntests/test_space_ci_dependency_contract.py'
-          test "$(git diff --cached --name-only | sort)" = "$expected"
-          git config user.name 'Lutar, Stephen P.'
-          git config user.email 'stephenlutar2@gmail.com'
-          git commit -s -m 'build(deps): reconcile Yarqa Python lock graph'
-          git push origin "HEAD:refs/heads/$branch"
+          python -m venv .resolver-venv
+          .resolver-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir 'uv==0.8.22'
+          .resolver-venv/bin/uv --version > lock-candidate/compiler-version.txt
+          .resolver-venv/bin/uv pip compile \
+            --python-version 3.11 --python-platform x86_64-manylinux2014 \
+            --generate-hashes --no-strip-extras \
+            --output-file space/requirements.lock \
+            --upgrade-package 'uvicorn==0.53.0' \
+            pyproject.toml space/requirements.txt
+          .resolver-venv/bin/uv pip compile \
+            --extra test --python-version 3.11 --python-platform x86_64-manylinux2014 \
+            --generate-hashes --no-strip-extras \
+            --output-file .github/requirements/space-ci.lock \
+            --upgrade-package 'uvicorn==0.53.0' \
+            pyproject.toml space/requirements.lock
+      - name: Reject unrequested graph changes and bind output hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, re, shutil
+          root = Path("lock-candidate")
+          pattern = re.compile(r"(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\s\\]+)")
+          def entries(path):
+              text = Path(path).read_text(encoding="utf-8")
+              matches = list(pattern.finditer(text))
+              if not matches:
+                  raise ValueError(f"no exact pins in {path}")
+              result = {}
+              for index, match in enumerate(matches):
+                  end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+                  name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
+                  hashes = sorted(set(re.findall(r"--hash=sha256:([0-9a-f]{64})", text[match.start():end])))
+                  if name in result or not hashes:
+                      raise ValueError(f"ambiguous or unhashed lock entry {name}")
+                  result[name] = {"version": match.group(2), "hashes": hashes}
+              return result
+          production = entries("space/requirements.lock")
+          test = entries(".github/requirements/space-ci.lock")
+          for current, old in ((production, entries(root / "before/runtime.lock")), (test, entries(root / "before/test.lock"))):
+              if set(current) != set(old):
+                  raise SystemExit("dependency membership changed; separate review required")
+              changed = {name for name in current if current[name]["version"] != old[name]["version"]}
+              if changed - {"uvicorn"} or current["uvicorn"]["version"] != "0.53.0":
+                  raise SystemExit(f"unexpected dependency version changes: {sorted(changed)}")
+              for name in current:
+                  if name != "uvicorn" and current[name] != old[name]:
+                      raise SystemExit(f"unrelated distribution hashes changed for {name}; review required")
+          for name, record in production.items():
+              if test.get(name) != record:
+                  raise SystemExit(f"production/test lock mismatch: {name}")
+          shutil.copyfile("space/requirements.lock", root / "requirements.lock")
+          shutil.copyfile(".github/requirements/space-ci.lock", root / "space-ci.lock")
+          manifest = json.loads((root / "resolution.json").read_text(encoding="utf-8"))
+          manifest.update(state="RESOLVED_CANDIDATE_ONLY", outputs_sha256={name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("requirements.lock", "space-ci.lock")}, versions={"runtime": {key: value["version"] for key, value in production.items()}, "test": {key: value["version"] for key, value in test.items()}}, runtime_pin_count=len(production), test_pin_count=len(test), repository_write_performed=False, source_tests_qualified=False, container_qualified=False, release_authorized=False)
+          (root / "resolution.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps({"state": manifest["state"], "source_sha": manifest["source_sha"], "uvicorn": production["uvicorn"]["version"], "runtime_pin_count": len(production), "test_pin_count": len(test)}))
+          PY
+          git diff -- space/requirements.lock .github/requirements/space-ci.lock > lock-candidate/generated-locks.patch
+      - name: Verify hash-required candidate installation without claiming source admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .candidate-venv
+          .candidate-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir --require-hashes --force-reinstall -r lock-candidate/space-ci.lock
+          .candidate-venv/bin/python -m pip check
+          .candidate-venv/bin/python -I - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+          import json
+          assert version("uvicorn") == "0.53.0", "candidate install selected wrong Uvicorn"
+          path = Path("lock-candidate/resolution.json")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          manifest["hashed_test_lock_install"] = "SUCCESS"
+          manifest["state"] = "RESOLVED_AND_INSTALLABLE_CANDIDATE_ONLY"
+          path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Upload immutable candidate evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yarqa-lock-candidate-${{ env.SOURCE_SHA }}-${{ github.run_attempt }}
+          path: lock-candidate/
+          if-no-files-found: error
+          retention-days: 7
