@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # One candidate-only object materialization, using independently checked resolver bytes.
 # No commit, ref, default branch, publisher, model or runtime write is performed.
-name: Materialize reviewed Yarqa lock objects
+name: Materialize reviewed Yarqa lock and witness objects
 on:
   pull_request:
     branches: [main]
@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Materialize exactly two verified Git objects without moving a ref
+      - name: Materialize the verified dependency and version-witness objects
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          """Materialize two already-reviewed lock blobs; never update a commit or ref."""
+          """Materialize verified locks and the exact matching Uvicorn witnesses; no ref writes."""
           from __future__ import annotations
           import base64
           import hashlib
@@ -110,7 +110,59 @@ jobs:
                   if blob.get("size") != len(data):
                       raise ValueError("source blob size mismatch")
                   prepared[path] = reviewed_candidate(data, spec)
-              # Only the two SHA-bound immutable objects are written. No refs/commits API.
+              # Source files below were read in full from this frozen main before review.
+              def exact_text(sha: str) -> str:
+                  blob = api(f"git/blobs/{sha}")
+                  if blob.get("sha") != sha or blob.get("encoding") != "base64":
+                      raise ValueError("invalid witness source response")
+                  data = base64.b64decode("".join(blob["content"].split()), validate=True)
+                  if len(data) > 100_000 or blob.get("size") != len(data) or git_blob_sha(data) != sha:
+                      raise ValueError("witness source identity mismatch")
+                  return data.decode("utf-8", errors="strict")
+              original_workflow = exact_text("26e618b5887dbd2f3d84ad5f477dda70cfdb930e")
+              original_tests = exact_text("ba86e045a3a8b35643400d787972a74eb2f55d3e")
+              expected_old_workflow = "4c9c9175fc205a7013bc5475c75748455dbfa09b822265479947c0a1ee76a710"
+              expected_old_run = "e6d111e0d857d976aee64f243ff11a79f78c36de94153aa8d30022380d4009ae"
+              old_version = '"uvicorn": "0.52.4"'
+              new_version = '"uvicorn": "0.53.0"'
+              if original_workflow.count(old_version) != 2 or original_tests.count(old_version) != 1:
+                  raise ValueError("version witness count changed")
+              if hashlib.sha256(original_workflow.encode()).hexdigest() != expected_old_workflow:
+                  raise ValueError("original workflow contract mismatch")
+              def run_block(workflow: str) -> str:
+                  marker = "      - name: Install, attest, and test the locked graph\n        run: |\n"
+                  if workflow.count(marker) != 1:
+                      raise ValueError("locked install step identity changed")
+                  lines = workflow[workflow.index(marker) + len(marker):].splitlines(keepends=True)
+                  body = []
+                  for line in lines:
+                      if line.startswith("      - name:") or (line and not line.startswith(" ") and line.strip()):
+                          break
+                      body.append(line)
+                  return "".join(body).rstrip("\n") + "\n"
+              if hashlib.sha256(run_block(original_workflow).encode()).hexdigest() != expected_old_run:
+                  raise ValueError("original run contract mismatch")
+              workflow = original_workflow.replace(old_version, new_version)
+              new_workflow_sha = hashlib.sha256(workflow.encode()).hexdigest()
+              new_run_sha = hashlib.sha256(run_block(workflow).encode()).hexdigest()
+              tests = original_tests.replace(old_version, new_version)
+              replacements = {
+                  f'EXPECTED_RUN_SHA256 = "{expected_old_run}"': f'EXPECTED_RUN_SHA256 = "{new_run_sha}"',
+                  f'EXPECTED_WORKFLOW_SHA256 = "{expected_old_workflow}"': f'EXPECTED_WORKFLOW_SHA256 = "{new_workflow_sha}"',
+              }
+              for old, new in replacements.items():
+                  if tests.count(old) != 1:
+                      raise ValueError("test contract constant missing or ambiguous")
+                  tests = tests.replace(old, new, 1)
+              restored = tests.replace(new_version, old_version)
+              for old, new in replacements.items():
+                  restored = restored.replace(new, old, 1)
+              if restored != original_tests or workflow.replace(new_version, old_version) != original_workflow:
+                  raise ValueError("witness change exceeds reviewed version-only scope")
+              prepared[".github/workflows/space-ci.yml"] = workflow.encode("utf-8")
+              prepared["tests/test_space_ci_dependency_contract.py"] = tests.encode("utf-8")
+              output["witness_scope"] = {"workflow": "two Uvicorn expected-version values only", "tests": "one Uvicorn expected value and its exact workflow/run byte-contract hashes", "previous_workflow_sha256": expected_old_workflow, "previous_run_sha256": expected_old_run, "workflow_sha256": new_workflow_sha, "run_sha256": new_run_sha, "thresholds_changed": False, "scanners_changed": False, "hash_required_install_preserved": True}
+              # These four immutable source objects are NOT commits or reference updates.
               for path, data in prepared.items():
                   result = api("git/blobs", {"encoding": "base64", "content": base64.b64encode(data).decode("ascii")})
                   expected_git = git_blob_sha(data)
