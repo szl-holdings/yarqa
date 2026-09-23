@@ -84,7 +84,7 @@ jobs:
               "pip": "26.2.1",
               "pytest": "9.1.1",
               "setuptools": "84.0.0",
-              "uvicorn": "0.52.4",
+              "uvicorn": "0.53.0",
               "wheel": "0.48.0",
           }
           observed = {name: actual.get(name) for name in required}
@@ -212,7 +212,7 @@ jobs:
               "fastapi": "0.141.1",
               "pip": "26.2.1",
               "setuptools": "84.0.0",
-              "uvicorn": "0.52.4",
+              "uvicorn": "0.53.0",
               "wheel": "0.48.0",
           }
           print(f"locked container runtime versions: {runtime_versions}")
