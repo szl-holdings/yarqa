@@ -1,10 +1,14 @@
 name: SZL Public Experience v3 Contract
 
 on:
-  pull_request:
+  pull_request: null
   push:
-    branches: [main, master]
-
+    branches:
+    - main
+    - master
+  merge_group:
+    types:
+    - checks_requested
 permissions:
   contents: read
 
