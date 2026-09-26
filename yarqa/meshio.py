@@ -7,18 +7,39 @@ self-describing **npz container** so that real mesh data (cell centers, cell
 velocities, face neighbors) can be loaded with NumPy alone, and provides a
 clearly **SAMPLE-labeled synthetic** generator for when no mesh is supplied.
 
-The npz layout (all arrays optional except the first three):
+The npz layout (centers, velocities and one neighbor encoding are required;
+corners are optional):
 
-    centers     : (N, D) float    cell-center coordinates
-    velocities  : (N, D) float    cell-center velocity vectors
-    neighbors   : object/ragged   per-cell neighbor id arrays  (see below)
-    corners     : object/ragged   optional per-cell corner clouds
+    centers            : (N, D) float   cell-center coordinates
+    velocities         : (N, D) float   cell-center velocity vectors
+    neighbors_flat     : (E,) int       all neighbor ids, concatenated per cell
+    neighbors_offsets  : (N+1,) int     cell i owns neighbors_flat[off[i]:off[i+1]]
+    corners_flat       : (M, D) float   all corner points, concatenated per cell
+    corners_offsets    : (N+1,) int     cell i owns corners_flat[off[i]:off[i+1]]
 
-Because ``np.savez`` cannot store a ragged list of differing-length neighbor
-arrays directly as one rectangular array, neighbors are stored in a flat CSR-like
-pair: ``neighbors_flat`` (1-D int) + ``neighbors_offsets`` (length N+1 int), or,
-when present, a single object array ``neighbors``. :func:`load_npz_mesh`
-transparently accepts either encoding.
+Because ``np.savez`` cannot store a ragged list of differing-length arrays as
+one rectangular array, ragged per-cell data (neighbors, corners) is stored as
+a flat CSR-like (flat, offsets) pair. For meshes where every cell has the same
+count, a rectangular ``neighbors`` (N, K) integer array and a rectangular
+``corners`` (N, K, D) numeric array are also accepted on load.
+
+Every array is plain numeric. :func:`load_npz_mesh` opens files with
+``allow_pickle=False`` and never unpickles anything. A ``dtype=object`` array in
+a member it reads (such as the older ragged ``neighbors``/``corners``
+encoding) is refused with ``ValueError``, and the file must be re-saved with
+:func:`save_npz_mesh`. Members it does not read, such as an unused key or an
+object ``corners`` next to a ``corners_flat``/``corners_offsets`` pair, are
+ignored. Unpickling an untrusted file can run arbitrary code, so this refusal
+is deliberate and has no opt-out.
+
+Compatibility: yarqa builds from before this layout (every commit from
+234afc4, 2026-06-11, where this module was added, through 99e16ae) wrote
+corners as a pickled object array, which is now refused, and do not read
+``corners_flat`` or ``corners_offsets``. Such a build loads a file written
+here without its corners and silently falls back to center-derived points,
+so read corner meshes with a build that has this layout. The version string
+does not tell them apart: those builds from 668071b (2026-07-02) onward also
+report ``yarqa.__version__`` 0.5.0; older ones report 0.4.0.
 
 An OpenFOAM (or VTK) importer would simply translate that solver's data into
 these same three arrays; doing so is intentionally OUT OF SCOPE here so yarqa
@@ -40,8 +61,9 @@ from .core import Mesh
 def save_npz_mesh(path: str, mesh: Mesh) -> None:
     """Write a :class:`Mesh` to the simple yarqa ``.npz`` container.
 
-    Neighbors are flattened to a CSR-like (flat, offsets) pair so the file is a
-    plain rectangular-array npz with no pickled object arrays.
+    Neighbors and (optional) corners are flattened to CSR-like (flat, offsets)
+    pairs so the file is a plain rectangular-array npz with no pickled object
+    arrays; it loads with ``allow_pickle=False``.
     """
     flat: list[int] = []
     offsets = [0]
@@ -56,47 +78,154 @@ def save_npz_mesh(path: str, mesh: Mesh) -> None:
         "neighbors_offsets": np.asarray(offsets, dtype=int),
     }
     if mesh.corners is not None:
-        # Corners are ragged; store as an object array (NumPy pickles it).
-        payload["corners"] = np.array(
-            [np.asarray(c, dtype=float) for c in mesh.corners], dtype=object
+        # Corners are ragged (K_i points per cell); store them CSR-like, exactly
+        # like neighbors, so the file never holds a pickled object array.
+        dim = payload["centers"].shape[1]
+        clouds = []
+        for i, c in enumerate(mesh.corners):
+            cloud = np.asarray(c, dtype=float)
+            if cloud.ndim != 2 or cloud.shape[1] != dim:
+                raise ValueError(
+                    f"corners[{i}] must be a (K, {dim}) array, got shape {cloud.shape}"
+                )
+            clouds.append(cloud)
+        payload["corners_flat"] = (
+            np.concatenate(clouds, axis=0) if clouds else np.zeros((0, dim))
+        )
+        payload["corners_offsets"] = np.cumsum(
+            [0] + [len(c) for c in clouds], dtype=int
         )
     np.savez(path, **payload)
 
 
+_PICKLE_REFUSED = "legacy pickled npz refused; re-save with save_npz_mesh"
+
+# Phrases in the ValueError NumPy raises when allow_pickle=False stops it from
+# unpickling: an object array ("Object arrays cannot be loaded when
+# allow_pickle=False") or a file that is neither .npz nor .npy ("Cannot load
+# file containing pickled data ..." up to NumPy 2.0, "This file contains
+# pickled (object) data ..." in 2.4/2.5). NumPy's max_header_size refusal also
+# mentions allow_pickle but matches neither phrase, so it passes through
+# unchanged. Only the error text depends on this match: with allow_pickle=False
+# nothing is ever unpickled, whatever NumPy's wording.
+_NUMPY_PICKLE_REFUSALS = ("Object arrays cannot be loaded", "pickled")
+
+
+def _is_pickle_refusal(exc: ValueError) -> bool:
+    return any(phrase in str(exc) for phrase in _NUMPY_PICKLE_REFUSALS)
+
+
+def _field(data, key: str) -> np.ndarray:
+    """Read one array from an ``allow_pickle=False`` npz, naming pickle refusals."""
+    try:
+        value = data[key]
+    except ValueError as exc:
+        # NumPy refuses dtype=object members because they are stored pickled.
+        if _is_pickle_refusal(exc):
+            raise ValueError(
+                f"npz mesh field {key!r} is a pickled object array: {_PICKLE_REFUSED}"
+            ) from exc
+        raise
+    if not isinstance(value, np.ndarray):
+        # NpzFile hands back raw bytes for a member without the .npy header.
+        raise ValueError(f"npz mesh field {key!r} is not a .npy array member")
+    return value
+
+
+def _split_csr(flat: np.ndarray, offsets: np.ndarray, name: str) -> list[np.ndarray]:
+    """Split ``flat`` into per-cell rows using a CSR-like ``offsets`` array."""
+    if offsets.ndim != 1 or offsets.dtype.kind not in "iu" or len(offsets) == 0:
+        raise ValueError(f"'{name}_offsets' must be a non-empty 1-D integer array")
+    offsets = offsets.astype(int)
+    if offsets[0] != 0 or offsets[-1] != len(flat) or np.any(np.diff(offsets) < 0):
+        raise ValueError(
+            f"'{name}_offsets' must start at 0, be non-decreasing, and end at "
+            f"len('{name}_flat')"
+        )
+    return [flat[offsets[i] : offsets[i + 1]] for i in range(len(offsets) - 1)]
+
+
 def _neighbors_from_npz(data) -> list[np.ndarray]:
     """Recover the per-cell neighbor lists from either supported encoding."""
-    if "neighbors_flat" in data and "neighbors_offsets" in data:
-        flat = np.asarray(data["neighbors_flat"], dtype=int).ravel()
-        offsets = np.asarray(data["neighbors_offsets"], dtype=int).ravel()
-        return [flat[offsets[i] : offsets[i + 1]] for i in range(len(offsets) - 1)]
-    if "neighbors" in data:
-        raw = data["neighbors"]
-        # Object array of ragged arrays, or a 2-D rectangular array.
-        return [np.asarray(a, dtype=int).ravel() for a in raw]
+    # Membership is tested on ``data.files`` (a plain list of member names), not
+    # ``key in data``: NpzFile has no __contains__ before NumPy 1.25, so there
+    # ``in`` falls back to Mapping.__contains__, which reads the whole member.
+    names = data.files
+    if "neighbors_flat" in names and "neighbors_offsets" in names:
+        flat = np.asarray(_field(data, "neighbors_flat"), dtype=int).ravel()
+        return _split_csr(flat, _field(data, "neighbors_offsets"), "neighbors")
+    if "neighbors" in names:
+        raw = _field(data, "neighbors")
+        if raw.ndim != 2 or raw.dtype.kind not in "iu":
+            raise ValueError(
+                "'neighbors' must be a rectangular (N, K) integer array; store "
+                "ragged neighbors as 'neighbors_flat'+'neighbors_offsets'"
+            )
+        return [np.asarray(row, dtype=int) for row in raw]
     raise ValueError(
         "npz mesh is missing neighbors: provide either 'neighbors_flat'+"
-        "'neighbors_offsets' or a 'neighbors' object array"
+        "'neighbors_offsets' or a rectangular (N, K) integer 'neighbors' array"
     )
+
+
+def _corners_from_npz(data, dim: int) -> list[np.ndarray] | None:
+    """Recover optional per-cell corner clouds (CSR pair or rectangular array)."""
+    names = data.files  # not ``key in data``; see _neighbors_from_npz
+    has_flat, has_off = "corners_flat" in names, "corners_offsets" in names
+    if has_flat or has_off:
+        if not (has_flat and has_off):
+            raise ValueError(
+                "'corners_flat' and 'corners_offsets' must be provided together"
+            )
+        flat = _field(data, "corners_flat")
+        if flat.ndim != 2 or flat.shape[1] != dim or flat.dtype.kind not in "iuf":
+            raise ValueError(f"'corners_flat' must be a numeric (M, {dim}) array")
+        flat = np.asarray(flat, dtype=float)
+        return _split_csr(flat, _field(data, "corners_offsets"), "corners")
+    if "corners" in names:
+        raw = _field(data, "corners")
+        if raw.ndim != 3 or raw.shape[2] != dim or raw.dtype.kind not in "iuf":
+            raise ValueError(
+                f"'corners' must be a rectangular (N, K, {dim}) numeric array; "
+                "store ragged corners as 'corners_flat'+'corners_offsets'"
+            )
+        return [np.asarray(c, dtype=float) for c in raw]
+    return None
 
 
 def load_npz_mesh(path: str) -> Mesh:
     """Load a :class:`Mesh` from a yarqa ``.npz`` file.
 
-    Accepts both the CSR-like neighbor encoding written by :func:`save_npz_mesh`
-    and a plain ``neighbors`` object/2-D array. Raises ``ValueError`` with a
-    clear message on a malformed file rather than failing obscurely.
+    Accepts the CSR-like neighbor/corner encoding written by
+    :func:`save_npz_mesh` and rectangular numeric ``neighbors``/``corners``
+    arrays. The file is opened with ``allow_pickle=False``, so nothing is ever
+    unpickled: an object array in a member it reads, an object ``.npy`` and a
+    pickled file are refused with ``ValueError``, and members it does not read
+    are ignored. Raises ``ValueError`` with a clear message on a malformed file
+    rather than failing obscurely.
     """
-    # allow_pickle is needed only for an optional 'corners'/'neighbors' object
-    # array; the common path uses plain numeric arrays.
-    with np.load(path, allow_pickle=True) as data:
-        if "centers" not in data or "velocities" not in data:
+    try:
+        npz = np.load(path, allow_pickle=False)
+    except ValueError as exc:
+        # Raised for input that is not an .npz/.npy file (NumPy would try to
+        # unpickle it) and for an object-dtype .npy; neither is unpickled.
+        if _is_pickle_refusal(exc):
+            raise ValueError(
+                f"{path} is not a plain .npz mesh archive and NumPy would have "
+                "to try unpickling it: pickle loading refused; write meshes "
+                "with save_npz_mesh"
+            ) from exc
+        raise
+    if not isinstance(npz, np.lib.npyio.NpzFile):
+        raise ValueError(f"{path} is a single .npy array, not an .npz mesh archive")
+    with npz as data:
+        if "centers" not in data.files or "velocities" not in data.files:
             raise ValueError("npz mesh must contain 'centers' and 'velocities'")
-        centers = np.asarray(data["centers"], dtype=float)
-        velocities = np.asarray(data["velocities"], dtype=float)
+        centers = np.asarray(_field(data, "centers"), dtype=float)
+        velocities = np.asarray(_field(data, "velocities"), dtype=float)
         neighbors = _neighbors_from_npz(data)
-        corners = None
-        if "corners" in data:
-            corners = [np.asarray(c, dtype=float) for c in data["corners"]]
+        dim = centers.shape[1] if centers.ndim == 2 else -1
+        corners = _corners_from_npz(data, dim)
     return Mesh(centers, velocities, neighbors, corners=corners)
 
 
