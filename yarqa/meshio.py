@@ -24,11 +24,13 @@ count, a rectangular ``neighbors`` (N, K) integer array and a rectangular
 ``corners`` (N, K, D) numeric array are also accepted on load.
 
 Every array is plain numeric. :func:`load_npz_mesh` opens files with
-``allow_pickle=False`` and never unpickles anything: an ``.npz`` that carries a
-``dtype=object`` array (the older ragged ``neighbors``/``corners`` encoding) is
-refused with ``ValueError`` and must be re-saved with :func:`save_npz_mesh`.
-Unpickling an untrusted file can run arbitrary code, so this refusal is
-deliberate and has no opt-out.
+``allow_pickle=False`` and never unpickles anything. A ``dtype=object`` array in
+a member it reads (such as the older ragged ``neighbors``/``corners``
+encoding) is refused with ``ValueError``, and the file must be re-saved with
+:func:`save_npz_mesh`. Members it does not read, such as an unused key or an
+object ``corners`` next to a ``corners_flat``/``corners_offsets`` pair, are
+ignored. Unpickling an untrusted file can run arbitrary code, so this refusal
+is deliberate and has no opt-out.
 
 Compatibility: yarqa builds from before this layout (every commit from
 234afc4, 2026-06-11, where this module was added, through 99e16ae) wrote
@@ -196,10 +198,11 @@ def load_npz_mesh(path: str) -> Mesh:
 
     Accepts the CSR-like neighbor/corner encoding written by
     :func:`save_npz_mesh` and rectangular numeric ``neighbors``/``corners``
-    arrays. The file is opened with ``allow_pickle=False``: object arrays and
-    pickled files are refused with ``ValueError`` and never unpickled. Raises
-    ``ValueError`` with a clear message on a malformed file rather than failing
-    obscurely.
+    arrays. The file is opened with ``allow_pickle=False``, so nothing is ever
+    unpickled: an object array in a member it reads, an object ``.npy`` and a
+    pickled file are refused with ``ValueError``, and members it does not read
+    are ignored. Raises ``ValueError`` with a clear message on a malformed file
+    rather than failing obscurely.
     """
     try:
         npz = np.load(path, allow_pickle=False)
