@@ -21,16 +21,27 @@ pip install numpy
 
 ## Operational runtime
 
-The retained public runtime is the namespaced YARQA route in SZL Command Lab:
+Two public runtimes serve this code:
 
-<https://szlholdings-szl-command-lab.hf.space/api/yarqa>
+- **Standalone Space**
+  [`SZLHOLDINGS/yarqa`](https://huggingface.co/spaces/SZLHOLDINGS/yarqa). Its
+  only writer is `.github/workflows/hf-space.yml`, which calls the org's
+  reusable Dockerfile-derived deployer on each push to protected `main`. The
+  deployer publishes the `space/Dockerfile` COPY set, binds the exact source
+  SHA (`SZL_GIT_SHA`), restarts the Space, and attests the running Hub commit,
+  every published file by sha256, and `/`, `/healthz` and `/api/build-info`.
+  The Space card (the Hub `README.md`) is not published from this repository.
+- **Command Lab route**
+  <https://szlholdings-szl-command-lab.hf.space/api/yarqa>. Command Lab pins an
+  exact commit from this repository, executes a bounded synthetic
+  compartmentalization, emits a replayable receipt, and verifies that receipt
+  before returning `READY`.
 
-Command Lab pins an exact commit from this repository, executes a bounded
-synthetic compartmentalization, emits a replayable receipt, and verifies that
-receipt before returning `READY`. There is no standalone `SZLHOLDINGS/yarqa`
-Space. The route demonstrates integrity and reproducibility for its disclosed
-synthetic input; it is not CFD correctness, validation for a customer mesh, or
-authorization for an external action.
+The standalone publisher was retired on 2026-09-08 (#63), but the Space stayed
+public and running with no writer, so this repository is again its single
+source. Both runtimes demonstrate integrity and reproducibility for their
+disclosed synthetic input; they are not CFD correctness, validation for a
+customer mesh, or authorization for an external action.
 
 ## Use
 ```python

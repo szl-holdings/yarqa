@@ -293,7 +293,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         self.assertNotIn("--no-build-isolation -e .", dockerfile)
         self.assertNotIn("chown -R yarqa:yarqa /app", dockerfile)
 
-    def test_standalone_hf_publisher_is_retired_without_a_second_writer(self) -> None:
+    def test_space_has_exactly_one_committed_writer(self) -> None:
         self.assertFalse(RETIRED_HF_DEPLOY_WORKFLOW.exists())
 
         publisher_workflows = []
@@ -301,11 +301,11 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             if "hf-repo: SZLHOLDINGS/yarqa" in text:
                 publisher_workflows.append(path.name)
-        self.assertEqual([], publisher_workflows)
+        self.assertEqual(["hf-space.yml"], publisher_workflows)
 
         readme = " ".join(README.read_text(encoding="utf-8").split())
         self.assertIn(COMMAND_LAB_ROUTE, readme)
-        self.assertIn("There is no standalone `SZLHOLDINGS/yarqa` Space", readme)
+        self.assertIn("its only writer is `.github/workflows/hf-space.yml`", readme.lower())
 
 
 if __name__ == "__main__":

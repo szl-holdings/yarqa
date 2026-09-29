@@ -1,0 +1,102 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: Publication contract
+
+# Read-only PR/main check for the Space writer. It never holds a credential and
+# never talks to a Hugging Face write API. It dry-runs the exact reusable
+# deployer revision that hf-space.yml pins, with the inputs hf-space.yml
+# declares, so the deploy set is derived here the same way the real deploy
+# derives it. No third-party actions.
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publication-contract-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  publication-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source revision without third-party actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            HEAD_SHA="${GITHUB_SHA}"
+          fi
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth=1 origin "${HEAD_SHA}"
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "${HEAD_SHA}"
+          echo "HEAD_SHA=${HEAD_SHA}" >> "$GITHUB_ENV"
+
+      - name: Fetch the reusable deployer revision pinned by hf-space.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          PIN="$(grep -oE 'reusable-hf-deploy\.yml@[0-9a-f]{40}' .github/workflows/hf-space.yml | cut -d@ -f2)"
+          test "$(printf '%s\n' "$PIN" | grep -c .)" -eq 1
+          TOOLS="$RUNNER_TEMP/tools"
+          git init -q "$TOOLS"
+          git -C "$TOOLS" remote add origin "${GITHUB_SERVER_URL}/szl-holdings/.github.git"
+          git -C "$TOOLS" fetch -q --depth=1 origin "$PIN"
+          git -C "$TOOLS" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$TOOLS" rev-parse HEAD)" = "$PIN"
+          echo "TOOLS=${TOOLS}" >> "$GITHUB_ENV"
+          echo "deployer pin: $PIN"
+
+      - name: Dry-run the pinned deployer with hf-space.yml inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          read_input() {
+            python3 - "$1" <<'PY'
+          import re, sys
+          text = open(".github/workflows/hf-space.yml", encoding="utf-8").read()
+          found = re.findall(r"(?m)^      " + re.escape(sys.argv[1]) + r": (.+)$", text)
+          assert len(found) == 1, (sys.argv[1], found)
+          value = found[0].strip()
+          if value[:1] in "'\"" and value[-1:] == value[:1]:
+              value = value[1:-1]
+          print(value)
+          PY
+          }
+          HF_REPO="$(read_input hf-repo)"
+          DOCKERFILE="$(read_input dockerfile-path)"
+          INCLUDE_README="$(read_input include-readme)"
+          SMOKE="$(read_input smoke-paths)"
+          python3 -I -P "$TOOLS/.github/scripts/hf_deploy_from_dockerfile.py" \
+            --dry-run \
+            --repo-root . \
+            --github-repo "$GITHUB_REPOSITORY" \
+            --hf-repo "$HF_REPO" \
+            --ref "$HEAD_SHA" \
+            --source-sha "$HEAD_SHA" \
+            --dockerfile-path "$DOCKERFILE" \
+            --include-readme "$INCLUDE_README" \
+            --smoke-paths "$SMOKE" \
+            --manifest-out "$RUNNER_TEMP/hf-deploy-manifest.json"
+          python3 - "$RUNNER_TEMP/hf-deploy-manifest.json" <<'PY'
+          import json, sys
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          files = sorted(manifest["files"])
+          print("deploy set:", len(files), "files")
+          assert manifest["unresolved_sources"] == [], manifest["unresolved_sources"]
+          for required in ("Dockerfile", "pyproject.toml", "space/app.py", "yarqa/__init__.py"):
+              assert required in files, f"{required} missing from the derived deploy set"
+          # The Space card stays on the Hub: the GitHub project README is never published.
+          assert "README.md" not in files, "repository README must not overwrite the Space card"
+          for path in ("/", "/healthz", "/api/build-info"):
+              assert path in manifest["smoke_paths"], manifest["smoke_paths"]
+          PY
