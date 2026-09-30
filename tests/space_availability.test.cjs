@@ -44,7 +44,7 @@ for (const [method, badge] of [['Flow.refresh()', 'flowBadge'], ['Agent.run()', 
   });
 }
 
-test('a unavailable WebGL renderer is handled without claiming a sample result', async () => {
+test('an unavailable WebGL renderer is handled without claiming a sample result', async () => {
   const f = fixture();
   f.run('Flow.init = () => { throw new Error("WebGL unavailable"); };');
   await f.run('Flow.refresh()');
