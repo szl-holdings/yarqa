@@ -82,6 +82,7 @@ h2 .muted{font-size:13px;font-weight:500}
   border:1px solid var(--dim);color:var(--muted);background:var(--surface);text-transform:uppercase}
 .badge.live{color:#04120e;background:var(--accent);border-color:var(--accent);box-shadow:0 0 14px rgba(64,224,197,.4)}
 .badge.sample{color:var(--accent2);background:rgba(255,177,63,.1);border-color:rgba(255,177,63,.5)}
+.badge.unavailable{color:#ffb4b4;background:#30151c;border-color:#b66b73}
 .chip{font-family:var(--fm);font-size:11px;color:var(--muted);border:1px solid var(--border);
   background:var(--surface);padding:5px 10px;border-radius:8px}
 
