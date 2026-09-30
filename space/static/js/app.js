@@ -1,6 +1,6 @@
 /* Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
    yarqa Space front-end. Sovereign: global THREE r160 (vendored, zero CDN).
-   One code path per tab; LIVE/SAMPLE badges follow REAL backend reachability. */
+   LIVE/SAMPLE describe returned data; failed requests remain UNAVAILABLE. */
 'use strict';
 
 const REDUCED = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -9,7 +9,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 /* Universal fetch hardening: every request carries an AbortController timeout so
    a hung/slow endpoint can NEVER produce a perpetual spinner. On timeout or any
-   error the caller's catch fires and the panel honest-degrades to SAMPLE/
+   error the caller's catch fires and the panel honest-degrades to UNAVAILABLE/
    unreachable — never blank, never a forever-loading state. */
 const API_TIMEOUT_MS = 8000;
 async function api(path, opts) {
@@ -30,8 +30,9 @@ async function api(path, opts) {
 }
 function setBadge(el, state) {
   if (!el) return;
-  el.textContent = state === 'LIVE' ? 'LIVE' : 'SAMPLE';
-  el.className = 'badge ' + (state === 'LIVE' ? 'live' : 'sample');
+  const label = state === 'LIVE' || state === 'SAMPLE' ? state : 'UNAVAILABLE';
+  el.textContent = label;
+  el.className = 'badge ' + label.toLowerCase();
 }
 
 /* compartment palette */
@@ -156,15 +157,15 @@ const Flow = {
     });
   },
   async refresh() {
-    if (!this.ready) this.init();
     try {
+      if (!this.ready) this.init();
       const d = await api(`/api/compartments?align_threshold=${this.align}&top_k=${this.topk}`);
       setBadge($('#flowBadge'), d.state);
       $('#flowCount').textContent = `${d.n_compartments} compartments`;
       $('#flowDigest').textContent = d.receipt_digest;
       this.build(d);
       this.loaded = true;
-    } catch (e) { setBadge($('#flowBadge'), 'SAMPLE'); $('#flowCount').textContent = 'unreachable'; }
+    } catch (e) { this.loaded = false; setBadge($('#flowBadge'), 'UNAVAILABLE'); $('#flowCount').textContent = 'unreachable'; $('#flowDigest').textContent = 'UNAVAILABLE'; }
   }
 };
 $('#align').addEventListener('input', e => { Flow.align = +e.target.value; $('#alignOut').textContent = Flow.align.toFixed(2); });
@@ -194,7 +195,7 @@ const Agent = {
         log.appendChild(el);
       });
       this.loaded = true;
-    } catch (e) { setBadge($('#agentBadge'), 'SAMPLE'); log.innerHTML = '<div class="step"><span class="smeta">loop unreachable</span></div>'; }
+    } catch (e) { this.loaded = false; setBadge($('#agentBadge'), 'UNAVAILABLE'); log.innerHTML = '<div class="step"><span class="smeta">loop unreachable</span></div>'; }
   }
 };
 $('#runLoop').addEventListener('click', () => Agent.run());
@@ -224,7 +225,7 @@ const Chain = {
       this.json = d.chain_json;
       this.render(d.links, d.verify);
       this.loaded = true;
-    } catch (e) { setBadge($('#chainBadge'), 'SAMPLE'); $('#chainVerdict').textContent = 'unreachable'; }
+    } catch (e) { this.loaded = false; this.json = null; setBadge($('#chainBadge'), 'UNAVAILABLE'); $('#chainVerdict').textContent = 'unreachable'; }
   },
   async verify() {
     if (!this.json) return this.build();
@@ -295,7 +296,7 @@ const Forecast = {
       this.draw(d.history, d.projected);
       this.table(d.history, d.projected);
       this.loaded = true;
-    } catch (e) { setBadge($('#fcBadge'), 'SAMPLE'); }
+    } catch (e) { this.loaded = false; setBadge($('#fcBadge'), 'UNAVAILABLE'); }
   }
 };
 $('#hz').addEventListener('input', e => { Forecast.hz = +e.target.value; $('#hzOut').textContent = Forecast.hz; });
@@ -308,8 +309,10 @@ const Live = {
     const wrap = $('#feedCards'); wrap.innerHTML = '<div class="feed"><div class="fdetail dim">fetching feeds…</div></div>';
     try {
       const d = await api('/api/feeds' + (force ? '?force=true' : ''));
-      const anyLive = d.any_live;
-      setBadge($('#liveBadge'), anyLive ? 'LIVE' : 'SAMPLE');
+      const sources = Object.values(d.sources);
+      const allKnown = sources.length > 0 && sources.every(s => s.state === 'LIVE' || s.state === 'SAMPLE');
+      const anyLive = sources.some(s => s.state === 'LIVE');
+      setBadge($('#liveBadge'), allKnown && d.any_live === anyLive ? (anyLive ? 'LIVE' : 'SAMPLE') : 'UNAVAILABLE');
       wrap.innerHTML = '';
       Object.values(d.sources).forEach(s => {
         const el = document.createElement('div'); el.className = 'feed';
@@ -323,7 +326,7 @@ const Live = {
         wrap.appendChild(el);
       });
       this.loaded = true;
-    } catch (e) { setBadge($('#liveBadge'), 'SAMPLE'); wrap.innerHTML = '<div class="feed"><div class="ferr">feeds endpoint unreachable</div></div>'; }
+    } catch (e) { this.loaded = false; setBadge($('#liveBadge'), 'UNAVAILABLE'); wrap.innerHTML = '<div class="feed"><div class="ferr">feeds endpoint unreachable</div></div>'; }
   }
 };
 $('#refreshFeeds').addEventListener('click', () => Live.refresh(true));
@@ -340,7 +343,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     Flow.init();
     await Flow.refresh();
   } catch (e) {
-    /* honest-degrade: panels already render SAMPLE/unreachable on their own */
+    /* Failed panels retain UNAVAILABLE; no sample result is invented. */
   } finally {
     clearTimeout(watchdog);
     hideLoader();
