@@ -1,0 +1,59 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: HF Space deploy
+
+# The single committed writer for the Hugging Face Space SZLHOLDINGS/yarqa.
+# It calls the org's reusable Dockerfile-derived deployer, which:
+#   - publishes exactly the space/Dockerfile COPY sources (pyproject.toml,
+#     yarqa/, space/) plus that Dockerfile as the Space-root Dockerfile, as one
+#     Hub commit whose title names this source commit;
+#   - binds the exact source SHA into the SZL_GIT_SHA Space variable, restarts
+#     the Space, and reads /api/build-info back until it reports that SHA;
+#   - reads the Space API back until the exact Hub commit is RUNNING (fails on
+#     BUILD_ERROR / CONFIG_ERROR / RUNTIME_ERROR), re-fetches every published
+#     file at that Hub commit and compares sha256, and requires every smoke
+#     path below to return HTTP 200 with a body.
+# include-readme is false: the repository-root README is the GitHub project
+# card, and the Space card (the Hub README.md) is not yet published from here.
+# It fails closed when HF_TOKEN is not configured. It never runs on pull
+# requests; tests/test_hf_deploy_runtime_contract.py and
+# publication-contract.yml check this file on every PR.
+
+"on":
+  push:
+    branches: [main]
+    # Every published input. tests/test_hf_deploy_runtime_contract.py fails if
+    # a space/Dockerfile COPY source is missing here.
+    paths:
+      - pyproject.toml
+      - "yarqa/**"
+      - "space/**"
+      - .dockerignore
+      - .github/workflows/hf-space.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# One lock per Hub asset (hf-write/<type>/<owner>/<id>), never keyed by event.
+concurrency:
+  group: hf-write/space/SZLHOLDINGS/yarqa
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy exact source and attest live Space
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@1b3255219cd1d5fa7ac850195b18fc907cac2cbf
+    with:
+      hf-repo: SZLHOLDINGS/yarqa
+      ref: ${{ github.sha }}
+      require-default-branch-tip: true
+      dockerfile-path: space/Dockerfile
+      include-readme: false
+      prune: true
+      restart-space: true
+      wait-running: 1200
+      smoke-paths: '["/","/healthz","/api/build-info"]'
+      source-revision-variable: SZL_GIT_SHA
+      source-revision-probe-path: /api/build-info
+    secrets:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
