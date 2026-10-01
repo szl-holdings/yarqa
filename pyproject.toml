@@ -24,5 +24,14 @@ test = [
     "wheel==0.48.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/szl-holdings/yarqa"
+Source = "https://github.com/szl-holdings/yarqa"
+Issues = "https://github.com/szl-holdings/yarqa/issues"
+Changelog = "https://github.com/szl-holdings/yarqa/releases"
+
 [tool.setuptools.packages.find]
 include = ["yarqa*"]
+
+[tool.szl.release]
+import_names = ["yarqa"] # wheel top-level import names; the release gate fails if the built wheel differs
