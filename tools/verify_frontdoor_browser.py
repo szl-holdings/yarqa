@@ -55,9 +55,9 @@ def _incomplete(output: Path, error: str, exit_code: int = 2) -> int:
 
 def _settle_loader(page, timeout: int = 15000) -> None:
     """Wait for dismissal to start, then briefly for its end; a missing end is recorded, not raised."""
-    page.wait_for_function("document.querySelector('#loader').classList.contains('hidden')", timeout=timeout)
+    page.wait_for_function("document.querySelector('#loader').classList.contains('hidden')", timeout=timeout, polling=100)
     try:
-        page.wait_for_function("document.querySelector('#loader').hidden", timeout=2000)
+        page.wait_for_function("document.querySelector('#loader').hidden", timeout=2000, polling=100)
     except Exception:  # Playwright TimeoutError: LOADER_STATE then reports the loader as still exposed.
         pass
 
@@ -341,16 +341,27 @@ def _observe(output: Path, sync_playwright) -> int:
                     route.continue_()
 
             fixture.route("**/*", stall)
-            fixture.add_init_script("const t=window.setTimeout;window.setTimeout=(f,ms,...a)=>t(f,ms===%d?1200:ms,...a);" % WATCHDOG_MS)
+            fixture.add_init_script("(()=>{const t=window.setTimeout;window.__yarqaDelays=[];window.setTimeout=(f,ms,...a)=>"
+                                    "{window.__yarqaDelays.push(ms);return t(f,ms===%d?1200:ms,...a)}})();" % WATCHDOG_MS)
             watch = fixture.new_page()
             watch.on("pageerror", lambda error: errors.append(str(error)))
-            watch.goto(origin, wait_until="domcontentloaded")
-            before = watch.evaluate(LOADER_STATE)
-            _settle_loader(watch, timeout=5000)
-            after = watch.evaluate(LOADER_STATE)
-            loaders.append({"motion": motion, "initially_exposed": before["exposed"],
-                            "dismissed_by_watchdog": _dismissed(after) and after["health"] == before["health"]
-                            and "ok" not in after["health"].split() and "bad" not in after["health"].split()})
+            row = {"motion": motion, "initially_exposed": False, "dismissed_by_watchdog": False}
+            try:
+                watch.goto(origin, wait_until="domcontentloaded")
+                before = watch.evaluate(LOADER_STATE)
+                row["initially_exposed"] = before["exposed"]
+                _settle_loader(watch, timeout=10000)
+                after = watch.evaluate(LOADER_STATE)
+                row["dismissed_by_watchdog"] = (_dismissed(after) and after["health"] == before["health"]
+                                                and "ok" not in after["health"].split() and "bad" not in after["health"].split())
+            except Exception as exc:  # Recorded as a failed case with diagnostics, not an aborted run.
+                row["error"] = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:200]}"
+            try:
+                row["scheduled_delays"] = watch.evaluate("window.__yarqaDelays.slice(0,20)")
+                row["loader"] = watch.evaluate(LOADER_STATE)
+            except Exception:
+                pass
+            loaders.append(row)
             fixture.unroute_all(behavior="ignoreErrors")  # Release the intentionally stalled request.
             fixture.close()
         report.update(sinks=sinks, deadline=deadline, forced_colors=forced, resize_focus=resize,
