@@ -115,3 +115,57 @@ test('an unknown feed state is not visually restyled as SAMPLE', async () => {
   assert.match(rendered, /badge unavailable/);
   assert.doesNotMatch(rendered, /badge sample/);
 });
+
+function loaderFixture(f) {
+  const attributes = new Map([['role', 'status']]), classes = new Set(), listeners = {};
+  return Object.assign(f.get('#loader'), {
+    hidden: false, inert: false,
+    classList: { add: (name) => classes.add(name), contains: (name) => classes.has(name) },
+    getAttribute: (name) => (attributes.has(name) ? attributes.get(name) : null),
+    setAttribute: (name, value) => attributes.set(name, String(value)),
+    removeAttribute: (name) => attributes.delete(name),
+    addEventListener: (type, listener) => { listeners[type] = listener; },
+    listeners,
+  });
+}
+
+test('a dismissed loader leaves the accessibility tree at once and is idempotent', () => {
+  const f = fixture();
+  const loader = loaderFixture(f);
+  f.run('dismissLoader()');
+  assert.equal(loader.getAttribute('role'), null);
+  assert.equal(loader.getAttribute('aria-hidden'), 'true');
+  assert.equal(loader.inert, true);
+  assert.equal(loader.hidden, true, 'reduced motion removes the loader without waiting for a fade');
+  f.run('dismissLoader()');
+  assert.equal(loader.hidden, true);
+});
+
+test('with motion, the loader is unexposed during its fade and hidden when it ends', () => {
+  const f = fixture();
+  const loader = loaderFixture(f);
+  f.run('REDUCED = false; dismissLoader()');
+  assert.equal(loader.getAttribute('aria-hidden'), 'true');
+  assert.equal(loader.inert, true);
+  assert.equal(loader.hidden, false);
+  loader.listeners.transitionend();
+  assert.equal(loader.hidden, true);
+});
+
+test('closing across the desktop breakpoint focuses the visible selected tab', () => {
+  const f = fixture();
+  let focused = 0, blur = null;
+  const tab = Object.assign(f.get('.tab[aria-selected="true"]'), {
+    tabIndex: -1, dataset: {}, focus() { focused += 1; },
+    addEventListener(type, listener) { if (type === 'blur') blur = listener; },
+  });
+  const roved = { tabIndex: 0 };
+  f.context.document.querySelectorAll = (selector) => (selector === '.tab' ? [roved, tab] : []);
+  f.run('focusDesktopTab()');
+  assert.equal(focused, 1);
+  assert.equal(tab.tabIndex, 0);
+  assert.equal(roved.tabIndex, -1, 'a previously roved tab gives up its stop');
+  assert.ok('focusRestored' in tab.dataset, 'restored focus carries an explicit visible ring');
+  blur();
+  assert.ok(!('focusRestored' in tab.dataset));
+});

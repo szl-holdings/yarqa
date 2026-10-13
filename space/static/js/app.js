@@ -119,7 +119,20 @@ sheet.addEventListener('keydown', event => {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 });
-window.addEventListener('resize', () => { if (window.innerWidth > 860 && !sheet.hidden) closeSheet(false); });
+/* Crossing to the desktop layout hides the modal sheet with CSS. Close it and
+   hand focus to the selected desktop tab (the FAB is hidden at this width), so
+   keyboard focus never stays inside a hidden subtree. */
+function focusDesktopTab() {
+  const tab = $('.tab[aria-selected="true"]') || $('.tab');
+  if (!tab) return;
+  $$('.tab').forEach(other => { other.tabIndex = other === tab ? 0 : -1; }); // one roving tab stop
+  tab.dataset.focusRestored = '';
+  tab.addEventListener('blur', () => { delete tab.dataset.focusRestored; }, { once: true });
+  tab.focus();
+}
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 860 && !sheet.hidden) { closeSheet(false); focusDesktopTab(); }
+});
 
 /* ===================== HEALTH ===================== */
 async function health() {
@@ -454,12 +467,26 @@ const Live = {
 $('#refreshFeeds').addEventListener('click', () => Live.refresh(true));
 
 /* ===================== BOOT ===================== */
+/* Dismissal removes the loader from the accessibility tree and focus order at
+   once; the visual fade then ends in display:none (immediately under reduced
+   motion). Normal completion and the watchdog share this one path. */
+function dismissLoader() {
+  const l = $('#loader');
+  if (!l || l.classList.contains('hidden')) return;
+  l.classList.add('hidden');
+  l.removeAttribute('role');
+  l.setAttribute('aria-hidden', 'true');
+  l.inert = true;
+  const finish = () => { l.hidden = true; };
+  if (REDUCED) { finish(); return; }
+  l.addEventListener('transitionend', finish, { once: true });
+  setTimeout(finish, 700); // transitionend is not guaranteed (hidden tab, no layout)
+}
 window.addEventListener('DOMContentLoaded', async () => {
   // Guarantee the loader is dismissed no matter what: a hard watchdog hides it
   // even if any boot step hangs past the fetch timeout, so the UI is never stuck
   // behind a perpetual spinner. Each panel then carries its own LIVE/SAMPLE badge.
-  const hideLoader = () => { const l = $('#loader'); if (l) l.classList.add('hidden'); };
-  const watchdog = setTimeout(hideLoader, API_TIMEOUT_MS + 1500);
+  const watchdog = setTimeout(dismissLoader, API_TIMEOUT_MS + 1500);
   try {
     paintMotion();
     await health();
@@ -468,6 +495,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     /* Failed panels retain UNAVAILABLE; no sample result is invented. */
   } finally {
     clearTimeout(watchdog);
-    hideLoader();
+    dismissLoader();
   }
 });

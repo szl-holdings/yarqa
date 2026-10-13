@@ -4,6 +4,10 @@
 HTTP responses are explicit local UNAVAILABLE fixtures. Successful, hostile and
 failed response paints use an in-memory API replacement; no simulation, receipt
 verification, feed fetch or operational POST is executed.
+
+Setup is declared in .github/requirements/frontdoor-browser.lock (QA only, never
+the Space runtime) plus `python -m playwright install chromium`. A missing
+dependency or browser is reported as an incomplete, failing result.
 """
 from __future__ import annotations
 
@@ -18,17 +22,62 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from playwright.sync_api import sync_playwright
-
 ROOT = Path(__file__).resolve().parents[1]
 WIDTHS = (320, 390, 768, 1280, 1920)
 ICON_SHA = "6e2b7d72a3af3d9602b79de41df0194ede6496a9661f057108ec224c0efc92e6"
 ASSETS = ("index.html", "style.css", "js/app.js", "lib/three.min.js",
           "szl-space-hologram.css", "szl-space-hologram.js")
+SETUP = ("python -m pip install --require-hashes -r .github/requirements/frontdoor-browser.lock"
+         " && python -m playwright install chromium")
+# Short-height mobile viewports: landscape phone and an on-screen-keyboard proxy.
+SHORT_VIEWPORTS = ((667, 320), (390, 300))
+# Boot watchdog delay in app.js (API_TIMEOUT_MS + 1500). One fixture captures that
+# registered callback and runs it while boot is still pending; hosted runners can
+# throttle page timers, so the fixture never races wall-clock delays.
+WATCHDOG_MS = 9500
+LOADER_STATE = """() => {const l=document.querySelector('#loader');return {exposed:l.getAttribute('role')==='status'
+  &&!l.hidden&&l.getAttribute('aria-hidden')!=='true',hidden:l.hidden,display:getComputedStyle(l).display,
+  ariaHidden:l.getAttribute('aria-hidden')==='true',role:l.hasAttribute('role'),inert:l.inert,
+  focusable:l.querySelectorAll('a,button,input,[tabindex]').length,
+  health:document.querySelector('#hdot').className}}"""
+
+
+def _dismissed(state: dict) -> bool:
+    return (state["hidden"] and state["display"] == "none" and state["ariaHidden"]
+            and not state["role"] and state["inert"] and state["focusable"] == 0)
+
+
+def _incomplete(output: Path, error: str, exit_code: int = 2) -> int:
+    report = {"observed_at": datetime.now(timezone.utc).isoformat(), "complete": False, "passed": False,
+              "error": error, "setup": SETUP}
+    (output / "results.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"passed": False, "complete": False, "error": error}))
+    return exit_code
+
+
+def _settle_loader(page, timeout: int = 15000) -> None:
+    """Wait for dismissal to start, then briefly for its end; a missing end is recorded, not raised."""
+    page.wait_for_function("document.querySelector('#loader').classList.contains('hidden')", timeout=timeout, polling=100)
+    try:
+        page.wait_for_function("document.querySelector('#loader').hidden", timeout=5000, polling=100)
+    except Exception:  # Playwright TimeoutError: LOADER_STATE then reports the loader as still exposed.
+        pass
 
 
 def run(output: Path) -> int:
     output.mkdir(parents=True, exist_ok=False)
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        return _incomplete(output, f"Playwright is not installed ({exc.name}); run: {SETUP}")
+    try:
+        return _observe(output, sync_playwright)
+    except Exception as exc:  # An aborted observation is incomplete and failing, never a partial pass.
+        first = (str(exc).splitlines() or [""])[0][:300]
+        return _incomplete(output, f"qualification aborted: {type(exc).__name__}: {first}", exit_code=1)
+
+
+def _observe(output: Path, sync_playwright) -> int:
     files = {"/" + name: (ROOT / "space/static" / name).read_bytes() for name in ASSETS}
     files["/"] = files["/index.html"]
     requests, writes, outside, errors = [], [], [], []
@@ -77,8 +126,14 @@ def run(output: Path) -> int:
               "source_hashes": {name: hashlib.sha256(body).hexdigest() for name, body in files.items()},
               "cases": []}
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True, executable_path=os.environ.get("CHROME_PATH"),
-                                    args=["--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        try:
+            browser = pw.chromium.launch(headless=True, executable_path=os.environ.get("CHROME_PATH"),
+                                        args=["--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        except Exception as exc:  # A missing or incompatible browser is a setup failure, never a pass.
+            server.shutdown()
+            server.server_close()
+            return _incomplete(output, f"Chromium could not start ({type(exc).__name__}); run: {SETUP}")
+        report["browser_version"] = browser.version
         context = browser.new_context(reduced_motion="reduce")
 
         def intercept(route):
@@ -98,7 +153,9 @@ def run(output: Path) -> int:
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": 1000})
             page.goto(origin, wait_until="domcontentloaded")
-            page.wait_for_function("document.querySelector('#loader').classList.contains('hidden')")
+            _settle_loader(page)
+            loader = page.evaluate(LOADER_STATE)
+            loader["dismissed"] = _dismissed(loader) and "initializing yarqa" not in page.locator("body").aria_snapshot()
             page.keyboard.press("Tab")
             skip_first = page.evaluate("document.activeElement.hasAttribute('data-szl-space-skip')")
             page.keyboard.press("Enter")
@@ -174,10 +231,69 @@ def run(output: Path) -> int:
             if width in (320, 1280):
                 page.evaluate("() => {document.activeElement.blur();document.querySelectorAll('.table-region').forEach(e=>{e.scrollLeft=0})}")
                 page.screenshot(path=str(output / f"yarqa-{width}.png"), full_page=False)
-            report["cases"].append({"width": width,"skip_first":skip_first,"skip_focus":skip_focus,
+            report["cases"].append({"width": width,"loader_dismissed":loader["dismissed"],"skip_first":skip_first,"skip_focus":skip_focus,
               "initial":initial,"orbit_key":orbit_key,"reduced_still":reduced_still,"disclosure":disclosure,
               "table_scroll":table_scroll,"nav_focus":menu_focus,"nav_trap_or_home":trap,
               "nav_escape_or_activation":escape,"nav_select":select,"layouts":layouts})
+        # Resize closure: an open mobile sheet crossing to desktop hands focus to
+        # the visible selected tab, and keyboard navigation continues there.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.evaluate("activate('flow')")
+        page.locator("#fab").click()
+        page.keyboard.press("Tab")
+        in_sheet = page.evaluate("document.querySelector('#sheet').contains(document.activeElement)")
+        page.evaluate("document.querySelector('#tab-chain').tabIndex=0")  # A roved, unselected desktop tab.
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.wait_for_timeout(100)
+        resize = page.evaluate("""() => {const a=document.activeElement;return {
+          sheetHidden:document.querySelector('#sheet').hidden&&document.querySelector('#sheetBackdrop').hidden,
+          backgroundActive:!document.querySelector('#main').inert&&!document.querySelector('.tabs').inert,
+          selectedTab:a.matches('.tab[aria-selected=true]'),visible:a.getClientRects().length>0,
+          singleTabStop:[...document.querySelectorAll('.tab')].filter(t=>t.tabIndex===0).length===1,
+          outline:getComputedStyle(a).outlineWidth}}""")
+        resize["inSheetBefore"] = in_sheet
+        page.keyboard.press("ArrowRight")
+        resize["keyboardContinues"] = page.evaluate("document.activeElement.id==='tab-agent'")
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(100)
+        page.locator("#fab").click()
+        page.keyboard.press("Escape")
+        resize["mobileEscape"] = page.evaluate("document.querySelector('#sheet').hidden&&document.activeElement.id==='fab'&&document.activeElement.getClientRects().length>0")
+        # Short-height sheet: Close, every workspace and the last source link are
+        # reachable by scrolling and by keyboard, without horizontal overflow.
+        short = []
+        for width, height in SHORT_VIEWPORTS:
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_timeout(100)
+            page.evaluate("activate('flow')")
+            page.locator("#fab").click()
+            page.wait_for_timeout(50)
+            geometry = page.evaluate("""() => {const s=document.querySelector('#sheet'),r=s.getBoundingClientRect(),
+              inView=e=>{const b=e.getBoundingClientRect();return b.top>=r.top-1&&b.bottom<=r.bottom+1&&b.top>=-1&&b.bottom<=innerHeight+1};
+              return {fits:r.top>=-1&&r.bottom<=innerHeight+1,
+                ownCap:Math.abs(parseFloat(getComputedStyle(s).maxHeight)-(innerHeight-12))<1.5,scrollable:s.scrollHeight>s.clientHeight&&getComputedStyle(s).overflowY==='auto',
+                closeAtTop:inView(document.querySelector('#closeSheet')),
+                noOverflow:document.documentElement.scrollWidth<=innerWidth+1&&s.scrollWidth<=s.clientWidth+1}}""")
+            page.mouse.move(width // 2, height - 20)
+            page.mouse.wheel(0, 2000)
+            page.wait_for_timeout(150)
+            geometry.update(page.evaluate("""() => {const s=document.querySelector('#sheet'),r=s.getBoundingClientRect(),
+              a=[...s.querySelectorAll('.sheet-sources a')].pop().getBoundingClientRect(),c=document.querySelector('#closeSheet').getBoundingClientRect();
+              return {wheelReachesEnd:s.scrollTop>0&&a.bottom<=r.bottom+1&&a.bottom<=innerHeight+1,
+                closeStaysVisible:c.top>=r.top-1&&c.bottom<=innerHeight+1}}"""))
+            page.evaluate("document.querySelector('#sheet').scrollTop=0")
+            controls = page.locator("#sheet button, #sheet a[href]")
+            reachable = []
+            for index in range(controls.count()):
+                controls.nth(index).focus()
+                reachable.append(page.evaluate("""() => {const s=document.querySelector('#sheet').getBoundingClientRect(),
+                  b=document.activeElement.getBoundingClientRect();return b.top>=s.top-1&&b.bottom<=s.bottom+1&&b.bottom<=innerHeight+1}"""))
+            page.keyboard.press("Tab")
+            geometry["trapToClose"] = page.evaluate("document.activeElement.id==='closeSheet'")
+            geometry["keyboardReach"] = len(reachable) >= 9 and all(reachable)
+            page.keyboard.press("Escape")
+            short.append({"width": width, "height": height, **geometry})
+        page.set_viewport_size({"width": 1280, "height": 1000})
         sinks = page.evaluate("""async () => {
           const hostile='<img src=x onerror="window.__injected=true">';
           api=async()=>({any_live:false,sources:{one:{state:'UNKNOWN',name:hostile,detail:hostile,
@@ -213,7 +329,51 @@ def run(output: Path) -> int:
           surface:getComputedStyle(document.querySelector('.side')).backgroundColor,
           image:getComputedStyle(document.querySelector('.side')).backgroundImage})""")
         icon = re.search(rb'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600".*?</svg>', files["/"], re.S)
-        report.update(sinks=sinks, deadline=deadline, forced_colors=forced,
+        loaders = []
+        for motion in ("reduce", "no-preference"):
+            fixture = browser.new_context(reduced_motion=motion)
+
+            def stall(route):
+                if route.request.method != "GET":
+                    writes.append(route.request.url)
+                    route.abort()
+                elif not route.request.url.startswith(origin + "/"):
+                    outside.append(route.request.url)
+                    route.abort()
+                elif urlsplit(route.request.url).path == "/healthz":
+                    return  # Never answered: boot stays pending, so only the watchdog can dismiss.
+                else:
+                    route.continue_()
+
+            fixture.route("**/*", stall)
+            fixture.add_init_script("(()=>{const t=window.setTimeout;window.__yarqaDelays=[];window.setTimeout=(f,ms,...a)=>"
+                                    "{window.__yarqaDelays.push(ms);if(ms===%d&&!window.__yarqaWatchdog)window.__yarqaWatchdog=f;"
+                                    "return t(f,ms,...a)}})();" % WATCHDOG_MS)
+            watch = fixture.new_page()
+            watch.on("pageerror", lambda error: errors.append(str(error)))
+            row = {"motion": motion, "initially_exposed": False, "dismissed_by_watchdog": False}
+            try:
+                watch.goto(origin, wait_until="domcontentloaded")
+                watch.wait_for_function("typeof window.__yarqaWatchdog==='function'", timeout=10000, polling=100)
+                before = watch.evaluate(LOADER_STATE)
+                row["initially_exposed"] = before["exposed"]
+                watch.evaluate("window.__yarqaWatchdog()")  # The app's own registered watchdog callback.
+                _settle_loader(watch, timeout=10000)
+                after = watch.evaluate(LOADER_STATE)
+                row["dismissed_by_watchdog"] = (_dismissed(after) and after["health"] == before["health"]
+                                                and "ok" not in after["health"].split() and "bad" not in after["health"].split())
+            except Exception as exc:  # Recorded as a failed case with diagnostics, not an aborted run.
+                row["error"] = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:200]}"
+            try:
+                row["scheduled_delays"] = watch.evaluate("window.__yarqaDelays.slice(0,20)")
+                row["loader"] = watch.evaluate(LOADER_STATE)
+            except Exception:
+                pass
+            loaders.append(row)
+            fixture.unroute_all(behavior="ignoreErrors")  # Release the intentionally stalled request.
+            fixture.close()
+        report.update(sinks=sinks, deadline=deadline, forced_colors=forced, resize_focus=resize,
+                      short_height=short, loader_watchdog=loaders,
                       exact_native_icon=icon is not None and hashlib.sha256(icon.group(0)+b"\n").hexdigest()==ICON_SHA)
         browser.close()
     server.shutdown()
@@ -221,15 +381,19 @@ def run(output: Path) -> int:
     report.update(page_errors=errors, attempted_writes=writes, blocked_external_requests=outside, request_paths=sorted(set(requests)))
     passed = report["exact_native_icon"] and not errors and not writes and not outside
     for case in report["cases"]:
-        passed = passed and all(case[key] for key in ("skip_first","skip_focus","orbit_key","reduced_still","disclosure","table_scroll","nav_focus","nav_trap_or_home","nav_escape_or_activation","nav_select"))
+        passed = passed and all(case[key] for key in ("loader_dismissed","skip_first","skip_focus","orbit_key","reduced_still","disclosure","table_scroll","nav_focus","nav_trap_or_home","nav_escape_or_activation","nav_select"))
         passed = passed and all(case["initial"].values())
         passed = passed and all(not row["small"] and not row["overflow"] and row["scrollWidth"]<=row["width"]+1 and row["surface"]=="rgb(17, 23, 34)" for row in case["layouts"])
     passed = passed and not sinks["injected"] and sinks["feed"]["markup"]==0 and sinks["feed"]["literal"] and sinks["feed"]["unknown"] and sinks["feed"]["invalidLinks"]==2 and sinks["fallback"]
     passed = passed and all(item["unavailable"] and item["cleared"] for item in sinks["failures"])
     passed = passed and deadline=={"aborted":True,"delay":8000,"rejected":True} and forced["outline"]=="3px" and forced["image"]=="none"
+    passed = passed and all(resize[key] for key in ("inSheetBefore","sheetHidden","backgroundActive","selectedTab","visible","singleTabStop","keyboardContinues","mobileEscape")) and resize["outline"] == "3px"
+    passed = passed and len(short) == len(SHORT_VIEWPORTS) and all(all(value for key, value in row.items() if key not in ("width", "height")) for row in short)
+    passed = passed and len(loaders) == 2 and all(row["initially_exposed"] and row["dismissed_by_watchdog"] for row in loaders)
+    report["complete"] = True
     report["passed"] = bool(passed)
     (output / "results.json").write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
-    print(json.dumps({"passed":report["passed"],"widths":len(report["cases"]),"page_errors":len(errors),"writes":len(writes),"external":len(outside),"report":str(output / "results.json")}))
+    print(json.dumps({"passed":report["passed"],"complete":True,"widths":len(report["cases"]),"short_height":len(short),"loader_fixtures":len(loaders),"page_errors":len(errors),"writes":len(writes),"external":len(outside),"report":str(output / "results.json")}))
     return 0 if passed else 1
 
 
