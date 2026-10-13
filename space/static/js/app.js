@@ -125,7 +125,7 @@ sheet.addEventListener('keydown', event => {
 function focusDesktopTab() {
   const tab = $('.tab[aria-selected="true"]') || $('.tab');
   if (!tab) return;
-  tab.tabIndex = 0;
+  $$('.tab').forEach(other => { other.tabIndex = other === tab ? 0 : -1; }); // one roving tab stop
   tab.dataset.focusRestored = '';
   tab.addEventListener('blur', () => { delete tab.dataset.focusRestored; }, { once: true });
   tab.focus();

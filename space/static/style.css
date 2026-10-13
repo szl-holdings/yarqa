@@ -260,8 +260,10 @@ summary{display:list-item;min-height:44px;padding:12px;cursor:pointer;font-size:
 .source-note span{flex-basis:100%}
 .sheet{max-inline-size:100%!important;background:var(--surface);border-top-color:var(--border-s)}
 /* Short viewports (landscape phones, on-screen keyboards): the sheet scrolls
-   inside its own envelope; body scrolling stays disabled. */
-.sheet{max-block-size:calc(100vh - 12px);max-block-size:calc(100dvh - 12px - env(safe-area-inset-top));
+   inside its own envelope; body scrolling stays disabled. The id selector must
+   outrank the later shared hologram dialog cap (0,1,1) so the safe-area-aware
+   limit is the one that applies. */
+#sheet{max-block-size:calc(100vh - 12px);max-block-size:calc(100dvh - 12px - env(safe-area-inset-top));
   overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .sheet-heading{position:sticky;top:-10px;z-index:1;background:var(--surface);padding-top:10px;margin-top:-10px}
 .tab[data-focus-restored]:focus{outline:3px solid var(--accent);outline-offset:3px}

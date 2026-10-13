@@ -242,12 +242,14 @@ def _observe(output: Path, sync_playwright) -> int:
         page.locator("#fab").click()
         page.keyboard.press("Tab")
         in_sheet = page.evaluate("document.querySelector('#sheet').contains(document.activeElement)")
+        page.evaluate("document.querySelector('#tab-chain').tabIndex=0")  # A roved, unselected desktop tab.
         page.set_viewport_size({"width": 1280, "height": 800})
         page.wait_for_timeout(100)
         resize = page.evaluate("""() => {const a=document.activeElement;return {
           sheetHidden:document.querySelector('#sheet').hidden&&document.querySelector('#sheetBackdrop').hidden,
           backgroundActive:!document.querySelector('#main').inert&&!document.querySelector('.tabs').inert,
           selectedTab:a.matches('.tab[aria-selected=true]'),visible:a.getClientRects().length>0,
+          singleTabStop:[...document.querySelectorAll('.tab')].filter(t=>t.tabIndex===0).length===1,
           outline:getComputedStyle(a).outlineWidth}}""")
         resize["inSheetBefore"] = in_sheet
         page.keyboard.press("ArrowRight")
@@ -268,7 +270,8 @@ def _observe(output: Path, sync_playwright) -> int:
             page.wait_for_timeout(50)
             geometry = page.evaluate("""() => {const s=document.querySelector('#sheet'),r=s.getBoundingClientRect(),
               inView=e=>{const b=e.getBoundingClientRect();return b.top>=r.top-1&&b.bottom<=r.bottom+1&&b.top>=-1&&b.bottom<=innerHeight+1};
-              return {fits:r.top>=-1&&r.bottom<=innerHeight+1,scrollable:s.scrollHeight>s.clientHeight&&getComputedStyle(s).overflowY==='auto',
+              return {fits:r.top>=-1&&r.bottom<=innerHeight+1,
+                ownCap:Math.abs(parseFloat(getComputedStyle(s).maxHeight)-(innerHeight-12))<1.5,scrollable:s.scrollHeight>s.clientHeight&&getComputedStyle(s).overflowY==='auto',
                 closeAtTop:inView(document.querySelector('#closeSheet')),
                 noOverflow:document.documentElement.scrollWidth<=innerWidth+1&&s.scrollWidth<=s.clientWidth+1}}""")
             page.mouse.move(width // 2, height - 20)
@@ -384,7 +387,7 @@ def _observe(output: Path, sync_playwright) -> int:
     passed = passed and not sinks["injected"] and sinks["feed"]["markup"]==0 and sinks["feed"]["literal"] and sinks["feed"]["unknown"] and sinks["feed"]["invalidLinks"]==2 and sinks["fallback"]
     passed = passed and all(item["unavailable"] and item["cleared"] for item in sinks["failures"])
     passed = passed and deadline=={"aborted":True,"delay":8000,"rejected":True} and forced["outline"]=="3px" and forced["image"]=="none"
-    passed = passed and all(resize[key] for key in ("inSheetBefore","sheetHidden","backgroundActive","selectedTab","visible","keyboardContinues","mobileEscape")) and resize["outline"] == "3px"
+    passed = passed and all(resize[key] for key in ("inSheetBefore","sheetHidden","backgroundActive","selectedTab","visible","singleTabStop","keyboardContinues","mobileEscape")) and resize["outline"] == "3px"
     passed = passed and len(short) == len(SHORT_VIEWPORTS) and all(all(value for key, value in row.items() if key not in ("width", "height")) for row in short)
     passed = passed and len(loaders) == 2 and all(row["initially_exposed"] and row["dismissed_by_watchdog"] for row in loaders)
     report["complete"] = True

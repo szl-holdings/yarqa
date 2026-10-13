@@ -159,9 +159,12 @@ test('closing across the desktop breakpoint focuses the visible selected tab', (
     tabIndex: -1, dataset: {}, focus() { focused += 1; },
     addEventListener(type, listener) { if (type === 'blur') blur = listener; },
   });
+  const roved = { tabIndex: 0 };
+  f.context.document.querySelectorAll = (selector) => (selector === '.tab' ? [roved, tab] : []);
   f.run('focusDesktopTab()');
   assert.equal(focused, 1);
   assert.equal(tab.tabIndex, 0);
+  assert.equal(roved.tabIndex, -1, 'a previously roved tab gives up its stop');
   assert.ok('focusRestored' in tab.dataset, 'restored focus carries an explicit visible ring');
   blur();
   assert.ok(!('focusRestored' in tab.dataset));
