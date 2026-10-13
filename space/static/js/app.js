@@ -3,9 +3,19 @@
    LIVE/SAMPLE describe returned data; failed requests remain UNAVAILABLE. */
 'use strict';
 
-const REDUCED = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+const motionQuery = window.matchMedia('(prefers-reduced-motion:reduce)');
+let REDUCED = motionQuery.matches;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const escapeText = value => String(value ?? '').replace(/[&<>"']/g, character =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+function publicLink(value, label) {
+  try {
+    const url = new URL(value);
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('unsupported source URL');
+    return `<a href="${escapeText(url.href)}" target="_blank" rel="noopener noreferrer">${escapeText(label)}</a>`;
+  } catch (_) { return `<span class="invalid-link">${escapeText(label)} · URL unavailable</span>`; }
+}
 
 /* Universal fetch hardening: every request carries an AbortController timeout so
    a hung/slow endpoint can NEVER produce a perpetual spinner. On timeout or any
@@ -41,12 +51,24 @@ const PALETTE = ['#40e0c5','#ffb13f','#5ad1ff','#c89bff','#ff6b8f','#9ef0c0',
 const colorFor = (id) => PALETTE[((id % PALETTE.length) + PALETTE.length) % PALETTE.length];
 
 /* ===================== TAB NAV ===================== */
-function activate(tab) {
+function activate(tab, focusPanel = false) {
+  if (!['flow', 'agent', 'chain', 'forecast', 'live'].includes(tab)) return;
   document.body.dataset.tab = tab;
   $$('.panel').forEach(p => p.classList.toggle('is-active', p.id === 'panel-' + tab));
-  $$('.tab').forEach(t => t.classList.toggle('is-active', t.dataset.go === tab));
-  $$('.sheet-item').forEach(t => t.classList.toggle('is-active', t.dataset.go === tab));
-  closeSheet();
+  $$('.tab').forEach(t => {
+    const selected = t.dataset.go === tab;
+    t.classList.toggle('is-active', selected);
+    t.setAttribute('aria-selected', String(selected));
+    t.tabIndex = selected ? 0 : -1;
+  });
+  $$('.sheet-item').forEach(t => {
+    const selected = t.dataset.go === tab;
+    t.classList.toggle('is-active', selected);
+    if (selected) t.setAttribute('aria-current', 'page');
+    else t.removeAttribute('aria-current');
+  });
+  closeSheet(false);
+  if (focusPanel) $('#panel-' + tab).focus();
   if (tab === 'flow' && Flow.ready) Flow.onResize();
   if (tab === 'flow' && !Flow.loaded) Flow.refresh();
   if (tab === 'agent' && !Agent.loaded) Agent.run();
@@ -54,14 +76,50 @@ function activate(tab) {
   if (tab === 'forecast' && !Forecast.loaded) Forecast.refresh();
   if (tab === 'live' && !Live.loaded) Live.refresh();
 }
-$$('[data-go]').forEach(b => b.addEventListener('click', () => activate(b.dataset.go)));
+$$('[data-go]').forEach(b => b.addEventListener('click', event => {
+  event.preventDefault();
+  activate(b.dataset.go, !b.classList.contains('tab'));
+}));
+$('#tabs').addEventListener('keydown', event => {
+  const tabs = $$('.tab');
+  const current = tabs.indexOf(document.activeElement);
+  if (current < 0) return;
+  const index = { ArrowLeft: (current + tabs.length - 1) % tabs.length,
+    ArrowRight: (current + 1) % tabs.length, Home: 0, End: tabs.length - 1 }[event.key];
+  if (index === undefined) return;
+  event.preventDefault();
+  tabs.forEach((tab, i) => { tab.tabIndex = i === index ? 0 : -1; });
+  tabs[index].focus(); // Manual activation: Enter/Space uses the native button click.
+});
 
 /* mobile sheet */
 const sheet = $('#sheet'), backdrop = $('#sheetBackdrop'), fab = $('#fab');
-function openSheet() { sheet.hidden = false; backdrop.hidden = false; fab.setAttribute('aria-expanded', 'true'); }
-function closeSheet() { sheet.hidden = true; backdrop.hidden = true; fab.setAttribute('aria-expanded', 'false'); }
+function sheetBackground(inert) {
+  $$('#main, .topbar, .tabs, .szl-space-skip-link, szl-space-ecosystem-bar').forEach(element => { element.inert = inert; });
+  fab.inert = inert;
+}
+function openSheet() {
+  sheet.hidden = false; backdrop.hidden = false; fab.setAttribute('aria-expanded', 'true');
+  sheetBackground(true);
+  ($('.sheet-item[data-go="' + document.body.dataset.tab + '"]') || $('#closeSheet')).focus();
+}
+function closeSheet(restoreFocus = true) {
+  const wasOpen = !sheet.hidden;
+  sheet.hidden = true; backdrop.hidden = true; fab.setAttribute('aria-expanded', 'false');
+  sheetBackground(false);
+  if (wasOpen && restoreFocus) fab.focus();
+}
 fab.addEventListener('click', () => sheet.hidden ? openSheet() : closeSheet());
-backdrop.addEventListener('click', closeSheet);
+backdrop.addEventListener('click', () => closeSheet());
+$('#closeSheet').addEventListener('click', () => closeSheet());
+sheet.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeSheet(); return; }
+  if (event.key !== 'Tab') return;
+  const controls = $$('button, a[href]', sheet), first = controls[0], last = controls[controls.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+window.addEventListener('resize', () => { if (window.innerWidth > 860 && !sheet.hidden) closeSheet(false); });
 
 /* ===================== HEALTH ===================== */
 async function health() {
@@ -78,15 +136,15 @@ async function health() {
 /* ===================== TAB 1: FLOW COMPARTMENTS 3D ===================== */
 const Flow = {
   ready: false, loaded: false, renderer: null, scene: null, camera: null,
-  group: null, raf: 0, align: 0.2, topk: 8,
+  group: null, raf: 0, align: 0.2, topk: 8, dirty: true, motionPaused: REDUCED,
   init() {
     const canvas = $('#scene');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#06091a');
-    this.scene.fog = new THREE.FogExp2('#06091a', 0.018);
+    this.scene.background = new THREE.Color('#080b12');
+    this.scene.fog = new THREE.FogExp2('#080b12', 0.018);
     this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 400);
     this.camera.position.set(0, 9, 15);
     this.camera.lookAt(0, 0.4, 0);
@@ -99,28 +157,46 @@ const Flow = {
     // simple drag-orbit
     let drag = false, px = 0, py = 0, rotY = 0, rotX = 0;
     const dn = e => { drag = true; const t = e.touches ? e.touches[0] : e; px = t.clientX; py = t.clientY; };
-    const mv = e => { if (!drag) return; const t = e.touches ? e.touches[0] : e; rotY += (t.clientX - px) * 0.006; rotX += (t.clientY - py) * 0.006; rotX = Math.max(-1.1, Math.min(1.1, rotX)); px = t.clientX; py = t.clientY; this.group.rotation.y = rotY; this.group.rotation.x = rotX; };
+    const mv = e => { if (!drag) return; const t = e.touches ? e.touches[0] : e; rotY += (t.clientX - px) * 0.006; rotX += (t.clientY - py) * 0.006; rotX = Math.max(-1.1, Math.min(1.1, rotX)); px = t.clientX; py = t.clientY; this.group.rotation.y = rotY; this.group.rotation.x = rotX; this.dirty = true; };
     const up = () => { drag = false; };
     canvas.addEventListener('mousedown', dn); window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
     canvas.addEventListener('touchstart', dn, { passive: true }); canvas.addEventListener('touchmove', mv, { passive: true }); canvas.addEventListener('touchend', up);
+    canvas.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === 'ArrowLeft') this.group.rotation.y -= 0.12;
+      if (event.key === 'ArrowRight') this.group.rotation.y += 0.12;
+      if (event.key === 'ArrowUp') this.group.rotation.x = Math.max(-1.1, this.group.rotation.x - 0.12);
+      if (event.key === 'ArrowDown') this.group.rotation.x = Math.min(1.1, this.group.rotation.x + 0.12);
+      rotY = this.group.rotation.y; rotX = this.group.rotation.x; this.dirty = true;
+    });
     this.ready = true;
     this.animate();
   },
   onResize() {
+    if (!this.renderer || !this.camera) return;
     const c = $('#scene'); const w = c.clientWidth || 1, h = c.clientHeight || 1;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    this.dirty = true;
   },
   animate() {
     const tick = () => {
       this.raf = requestAnimationFrame(tick);
-      if (!REDUCED && this.group) this.group.rotation.y += 0.0016;
-      this.renderer.render(this.scene, this.camera);
+      if (!this.loaded || document.hidden || document.body.dataset.tab !== 'flow') return;
+      if (!this.motionPaused && this.group) { this.group.rotation.y += 0.0016; this.dirty = true; }
+      if (this.dirty) { this.renderer.render(this.scene, this.camera); this.dirty = false; }
     };
     tick();
   },
   build(data) {
+    const geometries = new Set(), materials = new Set();
+    this.group.children.forEach(child => {
+      if (child.geometry) geometries.add(child.geometry);
+      (Array.isArray(child.material) ? child.material : [child.material]).filter(Boolean).forEach(material => materials.add(material));
+    });
     while (this.group.children.length) this.group.remove(this.group.children[0]);
+    geometries.forEach(geometry => geometry.dispose()); materials.forEach(material => material.dispose());
     const { centers, velocities, labels, nx, ny } = data;
     const cx = (nx - 1) / 2, cy = (ny - 1) / 2;
     const used = new Set();
@@ -152,22 +228,49 @@ const Flow = {
     const leg = $('#flowLegend'); leg.innerHTML = '';
     [...used].sort((a, b) => a - b).slice(0, 16).forEach(id => {
       const d = document.createElement('div'); d.className = 'lg';
-      d.innerHTML = `<span class="sw" style="background:${colorFor(id)}"></span>c${id}`;
+      d.innerHTML = `<span class="sw" style="background:${colorFor(id)}"></span>c${escapeText(id)}`;
       leg.appendChild(d);
     });
+    this.dirty = true;
+  },
+  evidence(data) {
+    $('#flowTable').innerHTML = '<caption>Top compartments · returned API summary, ordered by cell count</caption>' +
+      '<thead><tr><th scope="col">Compartment</th><th scope="col">Cells</th><th scope="col">Mean velocity</th></tr></thead><tbody>' +
+      data.top_compartments.map(c => `<tr><th scope="row">c${escapeText(c.id)}</th><td>${escapeText(c.n_cells)}</td><td>${escapeText(c.mean_velocity.map(value => value.toFixed(4)).join(', '))}</td></tr>`).join('') + '</tbody>';
   },
   async refresh() {
     try {
-      if (!this.ready) this.init();
       const d = await api(`/api/compartments?align_threshold=${this.align}&top_k=${this.topk}`);
       setBadge($('#flowBadge'), d.state);
       $('#flowCount').textContent = `${d.n_compartments} compartments`;
       $('#flowDigest').textContent = d.receipt_digest;
-      this.build(d);
+      this.evidence(d);
+      try {
+        $('#scene').hidden = false;
+        if (!this.ready) this.init();
+        this.build(d);
+        $('#flowRenderState').textContent = '3D view available · same response as the numerical summary';
+      } catch (_) {
+        $('#scene').hidden = true;
+        $('#flowRenderState').textContent = '3D view unavailable · returned numerical evidence remains accessible below';
+      }
       this.loaded = true;
-    } catch (e) { this.loaded = false; setBadge($('#flowBadge'), 'UNAVAILABLE'); $('#flowCount').textContent = 'unreachable'; $('#flowDigest').textContent = 'UNAVAILABLE'; }
+    } catch (e) {
+      this.loaded = false; setBadge($('#flowBadge'), 'UNAVAILABLE'); $('#flowCount').textContent = 'unreachable'; $('#flowDigest').textContent = 'UNAVAILABLE';
+      $('#scene').hidden = true; $('#flowLegend').innerHTML = '';
+      $('#flowTable').innerHTML = '<caption>Compartment data UNAVAILABLE</caption>';
+      $('#flowRenderState').textContent = 'Compartment endpoint unavailable · no result is substituted';
+    }
   }
 };
+function paintMotion() {
+  $('#toggleMotion').textContent = Flow.motionPaused ? 'Resume rotation' : 'Pause rotation';
+  $('#toggleMotion').setAttribute('aria-pressed', String(Flow.motionPaused));
+}
+$('#toggleMotion').addEventListener('click', () => { Flow.motionPaused = !Flow.motionPaused; paintMotion(); });
+if (motionQuery.addEventListener) motionQuery.addEventListener('change', event => {
+  REDUCED = event.matches; Flow.motionPaused = REDUCED; Flow.dirty = true; paintMotion();
+});
 $('#align').addEventListener('input', e => { Flow.align = +e.target.value; $('#alignOut').textContent = Flow.align.toFixed(2); });
 $('#align').addEventListener('change', () => Flow.refresh());
 $('#topk').addEventListener('input', e => { Flow.topk = +e.target.value; $('#kOut').textContent = Flow.topk; });
@@ -185,17 +288,18 @@ const Agent = {
       log.innerHTML = '';
       d.steps.forEach((s, i) => {
         const el = document.createElement('div'); el.className = 'step';
-        const wt = s.topk_weights.length ? ` · weights [${s.topk_weights.join(', ')}]` : '';
+        const wt = s.topk_weights.length ? ` · weights [${escapeText(s.topk_weights.join(', '))}]` : '';
+        const decisionClass = ['ALLOW', 'DENY'].includes(s.decision) ? s.decision : 'UNAVAILABLE';
         el.innerHTML = `<span class="sidx">#${i}</span>
-          <span class="smeta">obs <b>[${s.observation.map(x=>x.toFixed(2)).join(', ')}]</b> →
-          route c<b>${s.routed_compartment}</b> (score ${s.route_score.toFixed(3)}, top-k [${s.topk_compartments.join(', ')}]${wt})<br>
-          receipt <span class="dim">${s.yarqa_receipt_digest.slice(0,24)}…</span></span>
-          <span class="dec ${s.decision}">${s.decision}</span>`;
+          <span class="smeta">obs <b>[${escapeText(s.observation.map(x=>x.toFixed(2)).join(', '))}]</b> →
+          route c<b>${escapeText(s.routed_compartment)}</b> (score ${escapeText(s.route_score.toFixed(3))}, top-k [${escapeText(s.topk_compartments.join(', '))}]${wt})<br>
+          receipt <span class="dim">${escapeText(s.yarqa_receipt_digest.slice(0,24))}…</span></span>
+          <span class="dec ${decisionClass}">${escapeText(s.decision)}</span>`;
         if (REDUCED) el.style.animation = 'none';
         log.appendChild(el);
       });
       this.loaded = true;
-    } catch (e) { this.loaded = false; setBadge($('#agentBadge'), 'UNAVAILABLE'); log.innerHTML = '<div class="step"><span class="smeta">loop unreachable</span></div>'; }
+    } catch (e) { this.loaded = false; setBadge($('#agentBadge'), 'UNAVAILABLE'); $('#agentExperts').textContent = '— experts'; log.innerHTML = '<div class="step"><span class="smeta">loop unreachable</span></div>'; }
   }
 };
 $('#runLoop').addEventListener('click', () => Agent.run());
@@ -204,19 +308,26 @@ $('#runLoop').addEventListener('click', () => Agent.run());
 const Chain = {
   loaded: false, json: null,
   render(links, verify) {
+    if (!verify || typeof verify.ok !== 'boolean') { this.unavailable(); return; }
     const v = $('#chainView'); v.innerHTML = '';
     const broken = verify.first_broken_index;
     links.forEach(l => {
       const el = document.createElement('div');
       const isBroken = broken !== null && l.index >= broken;
       el.className = 'link' + (isBroken ? ' broken' : '');
-      el.innerHTML = `<div class="lh"><b>link #${l.index} · c${l.routed_compartment} · ${l.decision} · score ${l.route_score}</b><span class="okdot"></span></div>
-        <div class="ld"><span class="prevd">prev ${l.prev_digest.slice(0,18)}…</span> → <b>${l.digest.slice(0,18)}…</b></div>`;
+      el.innerHTML = `<div class="lh"><b>link #${escapeText(l.index)} · c${escapeText(l.routed_compartment)} · ${escapeText(l.decision)} · score ${escapeText(l.route_score)}</b><span class="okdot"></span></div>
+        <div class="ld"><span class="prevd">prev ${escapeText(l.prev_digest.slice(0,18))}…</span> → <b>${escapeText(l.digest.slice(0,18))}…</b></div>`;
       v.appendChild(el);
     });
     const vd = $('#chainVerdict');
-    if (verify.ok) { vd.textContent = `✓ intact · ${verify.n_links} links`; vd.className = 'verdict ok'; }
+    if (verify.ok === true) { vd.textContent = `✓ intact · ${verify.n_links} links`; vd.className = 'verdict ok'; }
     else { vd.textContent = `✗ TAMPER at link ${verify.first_broken_index}`; vd.className = 'verdict bad'; }
+  },
+  unavailable() {
+    this.loaded = false; this.json = null; setBadge($('#chainBadge'), 'UNAVAILABLE');
+    $('#chainVerdict').textContent = 'Verification UNAVAILABLE';
+    $('#chainVerdict').className = 'verdict unavailable';
+    $('#chainView').innerHTML = '';
   },
   async build() {
     try {
@@ -225,21 +336,26 @@ const Chain = {
       this.json = d.chain_json;
       this.render(d.links, d.verify);
       this.loaded = true;
-    } catch (e) { this.loaded = false; this.json = null; setBadge($('#chainBadge'), 'UNAVAILABLE'); $('#chainVerdict').textContent = 'unreachable'; }
+    } catch (e) { this.json = null; this.unavailable(); }
   },
   async verify() {
     if (!this.json) return this.build();
+    try {
     const d = await api('/api/chain/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chain_json: this.json }) });
     const links = JSON.parse(this.json).links.map(l => ({ index: l.index, prev_digest: l.prev_digest, digest: l.digest, decision: l.step.decision, routed_compartment: l.step.routed_compartment, route_score: (+l.step.route_score).toFixed(4) }));
     this.render(links, d.verify);
+    } catch (_) { this.unavailable(); }
   },
   async tamper() {
     if (!this.json) await this.build();
+    if (!this.json) return;
+    try {
     const n = JSON.parse(this.json).links.length;
     const idx = Math.floor(n / 2);
     const d = await api('/api/chain/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chain_json: this.json, tamper_index: idx, tamper_field: 'route_score' }) });
     const links = JSON.parse(this.json).links.map(l => ({ index: l.index, prev_digest: l.prev_digest, digest: l.digest, decision: l.step.decision, routed_compartment: l.step.routed_compartment, route_score: (+l.step.route_score).toFixed(4) }));
     this.render(links, d.verify);
+    } catch (_) { this.unavailable(); }
   }
 };
 $('#buildChain').addEventListener('click', () => Chain.build());
@@ -265,7 +381,7 @@ const Forecast = {
     ctx.strokeStyle = '#1d2950'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(pad, H - pad); ctx.lineTo(W - pad * 0.5, H - pad); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(pad, pad * 0.6); ctx.lineTo(pad, H - pad); ctx.stroke();
-    ctx.fillStyle = '#5d6a8f'; ctx.font = '10px ui-monospace,monospace';
+    ctx.fillStyle = '#aab7c9'; ctx.font = '11px ui-monospace,monospace';
     ctx.fillText('mean flow (m/s)', pad + 2, pad * 0.5);
     ctx.fillText('t →', W - pad * 1.4, H - pad + 14);
     // DATA solid
@@ -283,11 +399,11 @@ const Forecast = {
   },
   table(history, projected) {
     const t = $('#fcTable');
-    let h = '<tr><th>t</th><th>kind</th><th>compartments</th><th>mean flow</th></tr>';
+    let h = '<caption>Returned history and PROJECTED values · mean flow in m/s</caption><thead><tr><th scope="col">t</th><th scope="col">kind</th><th scope="col">compartments</th><th scope="col">mean flow</th></tr></thead><tbody>';
     history.concat(projected).forEach(p => {
-      h += `<tr class="${p.kind === 'PROJECTED' ? 'proj' : ''}"><td>${p.t}</td><td>${p.kind}</td><td>${p.n_compartments}</td><td>${p.mean_flow.toFixed(4)}</td></tr>`;
+      h += `<tr class="${p.kind === 'PROJECTED' ? 'proj' : ''}"><td>${escapeText(p.t)}</td><td>${escapeText(p.kind)}</td><td>${escapeText(p.n_compartments)}</td><td>${escapeText(p.mean_flow.toFixed(4))}</td></tr>`;
     });
-    t.innerHTML = h;
+    t.innerHTML = h + '</tbody>';
   },
   async refresh() {
     try {
@@ -296,7 +412,12 @@ const Forecast = {
       this.draw(d.history, d.projected);
       this.table(d.history, d.projected);
       this.loaded = true;
-    } catch (e) { this.loaded = false; setBadge($('#fcBadge'), 'UNAVAILABLE'); }
+    } catch (e) {
+      this.loaded = false; setBadge($('#fcBadge'), 'UNAVAILABLE');
+      $('#fcTable').innerHTML = '<caption>Forecast data UNAVAILABLE</caption>';
+      const canvas = $('#fcChart');
+      if (canvas.getContext) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    }
   }
 };
 $('#hz').addEventListener('input', e => { Forecast.hz = +e.target.value; $('#hzOut').textContent = Forecast.hz; });
@@ -316,13 +437,14 @@ const Live = {
       wrap.innerHTML = '';
       Object.values(d.sources).forEach(s => {
         const el = document.createElement('div'); el.className = 'feed';
-        const badge = `<span class="badge ${s.state === 'LIVE' ? 'live' : 'sample'}">${s.state}</span>`;
-        el.innerHTML = `<div class="fhead"><h3>${s.name}</h3>${badge}</div>
-          <div class="fdetail">${s.detail}</div>
-          <div class="fmeta">${s.speed_ms.toFixed(3)} m/s @ ${s.direction_deg.toFixed(0)}° · ${s.fetched_utc}<br>
-          source: <a href="${s.url}" target="_blank" rel="noopener">${s.url}</a><br>
-          ${s.attribution} · <a href="${s.license_url}" target="_blank" rel="noopener">license</a></div>
-          ${s.error ? `<div class="ferr">SAMPLE reason: ${s.error}</div>` : ''}`;
+        const state = ['LIVE', 'SAMPLE'].includes(s.state) ? s.state : 'UNAVAILABLE';
+        const badge = `<span class="badge ${state.toLowerCase()}">${state}</span>`;
+        el.innerHTML = `<div class="fhead"><h3>${escapeText(s.name)}</h3>${badge}</div>
+          <div class="fdetail">${escapeText(s.detail)}</div>
+          <div class="fmeta">${escapeText(s.speed_ms.toFixed(3))} m/s @ ${escapeText(s.direction_deg.toFixed(0))}° · ${escapeText(s.fetched_utc)}<br>
+          source: ${publicLink(s.url, s.url)}<br>
+          ${escapeText(s.attribution)} · ${publicLink(s.license_url, 'license')}</div>
+          ${s.error ? `<div class="ferr">${state === 'SAMPLE' ? 'SAMPLE reason' : 'Source error'}: ${escapeText(s.error)}</div>` : ''}`;
         wrap.appendChild(el);
       });
       this.loaded = true;
@@ -339,8 +461,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const hideLoader = () => { const l = $('#loader'); if (l) l.classList.add('hidden'); };
   const watchdog = setTimeout(hideLoader, API_TIMEOUT_MS + 1500);
   try {
+    paintMotion();
     await health();
-    Flow.init();
     await Flow.refresh();
   } catch (e) {
     /* Failed panels retain UNAVAILABLE; no sample result is invented. */
