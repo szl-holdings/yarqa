@@ -26,8 +26,18 @@ palette and hides the skip link until focused even under reduced motion.
 Desktop tabs expose selected state, a single tab stop and named panels;
 Left/Right/Home/End move focus, while native Enter/Space activates. The mobile
 dialog sets background content inert, keeps keyboard focus inside, returns
-focus on Escape and moves focus to the selected workspace. Zoom is unrestricted.
-Controls have explicit labels, usable hit areas and forced-color focus.
+focus on Escape and moves focus to the selected workspace. On short viewports the
+dialog scrolls inside its own envelope with the Close heading kept in view;
+the body never scrolls. If the window widens past 860px while the dialog is
+open, the dialog closes, background inertness clears and focus moves to the
+selected desktop tab with a visible ring (the menu button is hidden there).
+Zoom is unrestricted. Controls have explicit labels, usable hit areas and
+forced-color focus.
+
+The startup loader is a `role=status` only while it is visible. Normal
+completion and the boot watchdog share one dismissal path that removes the
+role, marks it `aria-hidden` and inert, then ends the fade with `hidden`
+(immediately under reduced motion).
 
 The Flow view renders the API's `top_compartments` summary in a keyboard-scrollable
 native table. Returned numerical evidence remains visible if WebGL fails, while
@@ -50,6 +60,22 @@ source passed 134 Python tests, with two optional skips, and 18 Node response
 fixtures. The full Python invocation denied network transport before imports and
 recorded zero unmocked transport attempts.
 
+The browser verifier's dependencies are declared separately from the Space
+runtime in `.github/requirements/frontdoor-browser.in` and its hash lock:
+
+```bash
+python -m venv .qa-venv
+.qa-venv/bin/python -m pip install --require-hashes -r .github/requirements/frontdoor-browser.lock
+.qa-venv/bin/python -m playwright install chromium
+.qa-venv/bin/python -I tools/verify_frontdoor_browser.py --output <new-directory>
+```
+
+`CHROME_PATH` may name a compatible local Chromium instead. A missing
+dependency or browser, or an aborted observation, writes `complete: false`,
+`passed: false` and exits nonzero; reuse of an old output directory is refused.
+`.github/workflows/frontdoor-browser.yml` runs the same steps on every pull
+request and main push and keeps the report and screenshots as an artifact.
+
 `tools/verify_frontdoor_browser.py --output <new-directory>` serves only the six
 static files over loopback. Every HTTP API response is an explicit unavailable
 fixture. Successful, hostile and failure paints use an in-memory response helper;
@@ -58,6 +84,13 @@ All five widths—320, 390, 768, 1280 and 1920px—passed keyboard, containment,
 surface, SVG identity, mobile dialog, WebGL fallback and timeout checks, with zero
 page errors, attempted writes or external requests. The review workspace retains
 the final report and screenshots at `hf_live_2026_10_11/yarqa-browser-qualified`.
+
+Later cases cover the dismissed loader at every width, a boot watchdog
+dismissal with `/healthz` held open (reduced and full motion), the 390→1280px
+resize focus hand-off and continued arrow-key navigation, and the sheet at
+667×320 and 390×300: Close, all five workspaces and the last source link are
+reachable by wheel scrolling and by keyboard, with no horizontal overflow.
+Reduced viewports are a keyboard-height proxy, not a real-device keyboard test.
 
 ## Publication
 

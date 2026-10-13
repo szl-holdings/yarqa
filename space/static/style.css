@@ -23,6 +23,7 @@ code{font-family:var(--fm)}
 #loader{position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;
   justify-content:center;background:radial-gradient(circle at 50% 40%,#0c1430,#05070d 70%);transition:opacity .5s}
 #loader.hidden{opacity:0;pointer-events:none}
+#loader[hidden]{display:none}
 #loader .ring{width:54px;height:54px;border-radius:50%;border:2px solid rgba(64,224,197,.22);
   border-top-color:var(--accent);animation:spin 1s linear infinite}
 #loader .lt{margin-top:16px;font-family:var(--fm);font-size:11px;letter-spacing:.16em;
@@ -258,6 +259,12 @@ summary{display:list-item;min-height:44px;padding:12px;cursor:pointer;font-size:
 .source-note a,.sheet-sources a{display:inline-flex;align-items:center;min-height:44px;color:var(--accent);text-underline-offset:3px}
 .source-note span{flex-basis:100%}
 .sheet{max-inline-size:100%!important;background:var(--surface);border-top-color:var(--border-s)}
+/* Short viewports (landscape phones, on-screen keyboards): the sheet scrolls
+   inside its own envelope; body scrolling stays disabled. */
+.sheet{max-block-size:calc(100vh - 12px);max-block-size:calc(100dvh - 12px - env(safe-area-inset-top));
+  overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.sheet-heading{position:sticky;top:-10px;z-index:1;background:var(--surface);padding-top:10px;margin-top:-10px}
+.tab[data-focus-restored]:focus{outline:3px solid var(--accent);outline-offset:3px}
 .sheet-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
 .sheet-heading h2{font-size:15px}
 .sheet-item{min-height:52px}
