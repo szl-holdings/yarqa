@@ -31,7 +31,9 @@ SETUP = ("python -m pip install --require-hashes -r .github/requirements/frontdo
          " && python -m playwright install chromium")
 # Short-height mobile viewports: landscape phone and an on-screen-keyboard proxy.
 SHORT_VIEWPORTS = ((667, 320), (390, 300))
-# Boot watchdog delay in app.js (API_TIMEOUT_MS + 1500), shortened in one fixture.
+# Boot watchdog delay in app.js (API_TIMEOUT_MS + 1500). One fixture captures that
+# registered callback and runs it while boot is still pending; hosted runners can
+# throttle page timers, so the fixture never races wall-clock delays.
 WATCHDOG_MS = 9500
 LOADER_STATE = """() => {const l=document.querySelector('#loader');return {exposed:l.getAttribute('role')==='status'
   &&!l.hidden&&l.getAttribute('aria-hidden')!=='true',hidden:l.hidden,display:getComputedStyle(l).display,
@@ -57,7 +59,7 @@ def _settle_loader(page, timeout: int = 15000) -> None:
     """Wait for dismissal to start, then briefly for its end; a missing end is recorded, not raised."""
     page.wait_for_function("document.querySelector('#loader').classList.contains('hidden')", timeout=timeout, polling=100)
     try:
-        page.wait_for_function("document.querySelector('#loader').hidden", timeout=2000, polling=100)
+        page.wait_for_function("document.querySelector('#loader').hidden", timeout=5000, polling=100)
     except Exception:  # Playwright TimeoutError: LOADER_STATE then reports the loader as still exposed.
         pass
 
@@ -342,14 +344,17 @@ def _observe(output: Path, sync_playwright) -> int:
 
             fixture.route("**/*", stall)
             fixture.add_init_script("(()=>{const t=window.setTimeout;window.__yarqaDelays=[];window.setTimeout=(f,ms,...a)=>"
-                                    "{window.__yarqaDelays.push(ms);return t(f,ms===%d?1200:ms,...a)}})();" % WATCHDOG_MS)
+                                    "{window.__yarqaDelays.push(ms);if(ms===%d&&!window.__yarqaWatchdog)window.__yarqaWatchdog=f;"
+                                    "return t(f,ms,...a)}})();" % WATCHDOG_MS)
             watch = fixture.new_page()
             watch.on("pageerror", lambda error: errors.append(str(error)))
             row = {"motion": motion, "initially_exposed": False, "dismissed_by_watchdog": False}
             try:
                 watch.goto(origin, wait_until="domcontentloaded")
+                watch.wait_for_function("typeof window.__yarqaWatchdog==='function'", timeout=10000, polling=100)
                 before = watch.evaluate(LOADER_STATE)
                 row["initially_exposed"] = before["exposed"]
+                watch.evaluate("window.__yarqaWatchdog()")  # The app's own registered watchdog callback.
                 _settle_loader(watch, timeout=10000)
                 after = watch.evaluate(LOADER_STATE)
                 row["dismissed_by_watchdog"] = (_dismissed(after) and after["health"] == before["health"]
