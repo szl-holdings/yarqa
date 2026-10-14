@@ -31,10 +31,31 @@ SETUP = ("python -m pip install --require-hashes -r .github/requirements/frontdo
          " && python -m playwright install chromium")
 # Short-height mobile viewports: landscape phone and an on-screen-keyboard proxy.
 SHORT_VIEWPORTS = ((667, 320), (390, 300))
+# The same sheets with positive env(safe-area-inset-*) values, set through the
+# DevTools Emulation.setSafeAreaInsetsOverride command on an emulated touch phone:
+# a notched portrait phone (keyboard-height proxy) and a landscape phone whose
+# sensor housing sits at the side edges.
+SAFE_AREA_VIEWPORTS = ((390, 300, {"top": 47, "right": 0, "bottom": 34, "left": 0}),
+                       (667, 320, {"top": 0, "right": 47, "bottom": 21, "left": 47}))
 # Boot watchdog delay in app.js (API_TIMEOUT_MS + 1500). One fixture captures that
 # registered callback and runs it while boot is still pending; hosted runners can
-# throttle page timers, so the fixture never races wall-clock delays.
+# throttle page timers, so that fixture never races wall-clock delays. A separate
+# fixture leaves every timer untouched and holds every API request open, so only
+# the real 9500 ms timer can dismiss the loader while the Flow request is pending.
 WATCHDOG_MS = 9500
+# Records the moment #loader gains .hidden (a MutationObserver; no timer is patched).
+OBSERVE_DISMISSAL = """(()=>{document.addEventListener('DOMContentLoaded',()=>{
+  window.__yarqaFlowInitial=document.querySelector('#flowCount').textContent},{once:true});
+  new MutationObserver((records,observer)=>{const l=document.querySelector('#loader');
+    if(!l||!l.classList.contains('hidden')||window.__yarqaDismissal)return;observer.disconnect();
+    window.__yarqaDismissal={at:performance.now(),flowPending:document.querySelector('#flowCount').textContent===window.__yarqaFlowInitial,
+      health:document.querySelector('#hdot').className}}).observe(document,{subtree:true,attributes:true,attributeFilter:['class']})})();"""
+# Restored desktop tab after the sheet closes across 860px.
+RESTORED_TAB = """() => {const a=document.activeElement,cs=getComputedStyle(a),tabs=[...document.querySelectorAll('.tab')];
+  return {sheetClosed:document.querySelector('#sheet').hidden&&!document.querySelector('.tabs').inert,
+    selectedFocus:a.id==='tab-flow'&&a.getAttribute('aria-selected')==='true',
+    oneTabIndexStop:tabs.filter(t=>t.tabIndex>=0).map(t=>t.id).join()==='tab-flow',
+    ring:cs.outlineStyle==='solid'&&cs.outlineWidth==='3px'&&cs.outlineColor!=='rgba(0, 0, 0, 0)'}}"""
 LOADER_STATE = """() => {const l=document.querySelector('#loader');return {exposed:l.getAttribute('role')==='status'
   &&!l.hidden&&l.getAttribute('aria-hidden')!=='true',hidden:l.hidden,display:getComputedStyle(l).display,
   ariaHidden:l.getAttribute('aria-hidden')==='true',role:l.hasAttribute('role'),inert:l.inert,
@@ -372,8 +393,135 @@ def _observe(output: Path, sync_playwright) -> int:
             loaders.append(row)
             fixture.unroute_all(behavior="ignoreErrors")  # Release the intentionally stalled request.
             fixture.close()
+        # Real timer delivery: no timer is patched or invoked by the verifier.
+        timed = []
+        for motion in ("reduce", "no-preference"):
+            fixture = browser.new_context(reduced_motion=motion)
+
+            def hold(route):
+                if route.request.method != "GET":
+                    writes.append(route.request.url)
+                    route.abort()
+                elif not route.request.url.startswith(origin + "/"):
+                    outside.append(route.request.url)
+                    route.abort()
+                elif urlsplit(route.request.url).path in files:
+                    route.continue_()
+                # Every API request stays unanswered; only app timers can end its wait.
+
+            fixture.route("**/*", hold)
+            fixture.add_init_script(OBSERVE_DISMISSAL)
+            real = fixture.new_page()
+            real.on("pageerror", lambda error: errors.append(str(error)))
+            row = {"motion": motion, "dismissed_by_real_watchdog": False}
+            try:
+                real.goto(origin, wait_until="domcontentloaded")
+                real.bring_to_front()
+                real.wait_for_function("!!window.__yarqaDismissal", timeout=30000, polling=250)
+                row["at_dismissal"] = real.evaluate("window.__yarqaDismissal")
+                _settle_loader(real, timeout=5000)
+                after = real.evaluate(LOADER_STATE)
+                row["loader"] = after
+                # The real 8000 ms API deadline already failed /healthz; the Flow request
+                # it started next is still pending, so boot's own completion cannot be the cause.
+                row["dismissed_by_real_watchdog"] = (row["at_dismissal"]["at"] >= WATCHDOG_MS
+                                                     and row["at_dismissal"]["flowPending"]
+                                                     and row["at_dismissal"]["health"].split() == ["hdot", "bad"]
+                                                     and _dismissed(after))
+            except Exception as exc:  # Recorded as a failed case with diagnostics, not an aborted run.
+                row["error"] = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:200]}"
+            timed.append(row)
+            fixture.unroute_all(behavior="ignoreErrors")
+            fixture.close()
+        # Positive safe-area insets with the real shared stylesheet: computed cap and
+        # top clearance, every sheet control inside the safe area, and the sticky Close
+        # reachable by pointer and keyboard after scrolling to the end.
+        safe_area = []
+        for width, height, insets in SAFE_AREA_VIEWPORTS:
+            notch = browser.new_context(reduced_motion="reduce", viewport={"width": width, "height": height},
+                                        is_mobile=True, has_touch=True)
+            notch.route("**/*", intercept)
+            phone = notch.new_page()
+            phone.on("pageerror", lambda error: errors.append(str(error)))
+            notch.new_cdp_session(phone).send("Emulation.setSafeAreaInsetsOverride", {"insets": insets})
+            phone.goto(origin, wait_until="domcontentloaded")
+            _settle_loader(phone)
+            phone.locator("#fab").click()
+            phone.wait_for_timeout(50)
+            fit = """(inset) => {const s=document.querySelector('#sheet'),r=s.getBoundingClientRect(),
+              close=document.querySelector('#closeSheet'),c=close.getBoundingClientRect(),
+              inside=b=>b.left>=inset.left-1&&b.right<=innerWidth-inset.right+1&&b.top>=inset.top-1&&b.bottom<=innerHeight+1,
+              probe=document.createElement('div');
+              probe.style.cssText='position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+              document.body.append(probe);const p=getComputedStyle(probe),
+                applied=[p.paddingTop,p.paddingRight,p.paddingBottom,p.paddingLeft].map(parseFloat).join();probe.remove();
+              const hit=document.elementFromPoint((c.left+c.right)/2,(c.top+c.bottom)/2);
+              return {insetApplied:applied===[inset.top,inset.right,inset.bottom,inset.left].join(),
+                cap:Math.abs(parseFloat(getComputedStyle(s).maxHeight)-(innerHeight-12-inset.top))<1.5,
+                topClearance:r.top>=12+inset.top-1&&r.bottom<=innerHeight+1,
+                scrollable:s.scrollHeight>s.clientHeight,
+                controlsInside:[...s.querySelectorAll('button,a[href]')].every(e=>{const b=e.getBoundingClientRect();
+                  return b.left>=inset.left-1&&b.right<=innerWidth-inset.right+1}),
+                closeInside:inside(c)&&c.top>=r.top-1,closeHit:!!hit&&(hit===close||close.contains(hit))}}"""
+            geometry = phone.evaluate(fit, insets)
+            phone.mouse.move(width // 2, height - insets["bottom"] - 20)
+            phone.mouse.wheel(0, 2000)
+            phone.wait_for_timeout(150)
+            end = phone.evaluate(fit, insets)
+            geometry.update(phone.evaluate("""(inset) => {const s=document.querySelector('#sheet'),r=s.getBoundingClientRect(),
+              a=[...s.querySelectorAll('.sheet-sources a')].pop().getBoundingClientRect();
+              return {scrolledToEnd:s.scrollTop>0&&a.bottom<=r.bottom+1&&a.bottom<=innerHeight-inset.bottom+1}}""", insets))
+            geometry.update(stickyCloseInside=end["closeInside"], stickyCloseHit=end["closeHit"])
+            phone.locator(".sheet-sources a").last.focus()
+            phone.keyboard.press("Tab")
+            geometry["keyboardToClose"] = phone.evaluate("""(inset) => {const c=document.activeElement.getBoundingClientRect();
+              return document.activeElement.id==='closeSheet'&&c.left>=inset.left-1&&c.right<=innerWidth-inset.right+1
+                &&c.top>=inset.top-1&&c.bottom<=innerHeight+1}""", insets)
+            phone.keyboard.press("Enter")
+            geometry["closeActivates"] = phone.evaluate("document.querySelector('#sheet').hidden&&document.activeElement.id==='fab'")
+            safe_area.append({"width": width, "height": height, "insets": insets, **geometry})
+            notch.close()
+        # Desktop-tab restoration on the real keyboard path: selected Flow, ArrowRight
+        # roves to the unselected Agent tab, the sheet opens by pointer at mobile width
+        # (so :focus-visible cannot supply the ring), then the window widens again.
+        restored = []
+        for motion in ("reduce", "no-preference"):
+            desk = browser.new_context(reduced_motion=motion, viewport={"width": 1280, "height": 800})
+            desk.route("**/*", intercept)
+            tabs = desk.new_page()
+            tabs.on("pageerror", lambda error: errors.append(str(error)))
+            tabs.goto(origin, wait_until="domcontentloaded")
+            _settle_loader(tabs)
+            tabs.locator("#tab-flow").focus()
+            tabs.keyboard.press("ArrowRight")
+            row = {"motion": motion, "rovedToUnselected": tabs.evaluate("""() => document.activeElement.id==='tab-agent'
+              &&document.activeElement.getAttribute('aria-selected')==='false'&&document.activeElement.tabIndex===0
+              &&document.querySelector('#tab-flow').getAttribute('aria-selected')==='true'""")}
+            tabs.set_viewport_size({"width": 390, "height": 844})
+            tabs.wait_for_timeout(100)
+            tabs.locator("#fab").click()
+            row["sheetOpen"] = tabs.evaluate("!document.querySelector('#sheet').hidden&&document.querySelector('#sheet').contains(document.activeElement)")
+            tabs.set_viewport_size({"width": 1280, "height": 800})
+            tabs.wait_for_timeout(250)
+            row.update(tabs.evaluate(RESTORED_TAB))
+            tabs.keyboard.press("Tab")
+            row["tabExits"] = tabs.evaluate("!document.activeElement.closest('.tabs')&&document.querySelector('#main').contains(document.activeElement)")
+            tabs.keyboard.press("Shift+Tab")
+            row["shiftTabReturns"] = tabs.evaluate("document.activeElement.id==='tab-flow'")
+            # Count the tablist's sequential stops with real Tab presses from the control before it.
+            stops = []
+            tabs.locator(".szl-identity").focus()
+            for _ in range(8):
+                tabs.keyboard.press("Tab")
+                if not tabs.evaluate("!!document.activeElement.closest('.tabs')"):
+                    break
+                stops.append(tabs.evaluate("document.activeElement.id"))
+            row["sequentialTabStops"] = stops
+            restored.append(row)
+            desk.close()
         report.update(sinks=sinks, deadline=deadline, forced_colors=forced, resize_focus=resize,
-                      short_height=short, loader_watchdog=loaders,
+                      short_height=short, loader_watchdog=loaders, loader_real_timer=timed,
+                      safe_area_sheet=safe_area, desktop_tab_restoration=restored,
                       exact_native_icon=icon is not None and hashlib.sha256(icon.group(0)+b"\n").hexdigest()==ICON_SHA)
         browser.close()
     server.shutdown()
@@ -390,10 +538,18 @@ def _observe(output: Path, sync_playwright) -> int:
     passed = passed and all(resize[key] for key in ("inSheetBefore","sheetHidden","backgroundActive","selectedTab","visible","singleTabStop","keyboardContinues","mobileEscape")) and resize["outline"] == "3px"
     passed = passed and len(short) == len(SHORT_VIEWPORTS) and all(all(value for key, value in row.items() if key not in ("width", "height")) for row in short)
     passed = passed and len(loaders) == 2 and all(row["initially_exposed"] and row["dismissed_by_watchdog"] for row in loaders)
+    passed = passed and len(timed) == 2 and all(row["dismissed_by_real_watchdog"] for row in timed)
+    passed = passed and len(safe_area) == len(SAFE_AREA_VIEWPORTS) and all(
+        all(value for key, value in row.items() if key not in ("width", "height", "insets")) for row in safe_area)
+    passed = passed and len(restored) == 2 and all(
+        all(value for key, value in row.items() if key not in ("motion", "sequentialTabStops"))
+        and row["sequentialTabStops"] == ["tab-flow"] for row in restored)
     report["complete"] = True
     report["passed"] = bool(passed)
     (output / "results.json").write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
-    print(json.dumps({"passed":report["passed"],"complete":True,"widths":len(report["cases"]),"short_height":len(short),"loader_fixtures":len(loaders),"page_errors":len(errors),"writes":len(writes),"external":len(outside),"report":str(output / "results.json")}))
+    print(json.dumps({"passed":report["passed"],"complete":True,"widths":len(report["cases"]),"short_height":len(short),"loader_fixtures":len(loaders),
+                      "real_timer_fixtures":len(timed),"safe_area_fixtures":len(safe_area),"tab_restoration_fixtures":len(restored),
+                      "page_errors":len(errors),"writes":len(writes),"external":len(outside),"report":str(output / "results.json")}))
     return 0 if passed else 1
 
 

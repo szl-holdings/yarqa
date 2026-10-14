@@ -92,6 +92,23 @@ resize focus hand-off and continued arrow-key navigation, and the sheet at
 reachable by wheel scrolling and by keyboard, with no horizontal overflow.
 Reduced viewports are a keyboard-height proxy, not a real-device keyboard test.
 
+The same sheets are rerun on an emulated touch phone with positive safe-area
+insets set through DevTools `Emulation.setSafeAreaInsetsOverride`: 390×300 with
+a 47px top and 34px bottom inset, and 667×320 landscape with 47px side insets.
+With the shared stylesheet loaded, each case checks the computed cap
+(`innerHeight - 12px - top inset`), the sheet's top clearance, every sheet
+control inside the side insets, and that the sticky Close stays hit-testable and
+keyboard-reachable after wheel scrolling to the end. The sheet's inline padding
+grows to the side insets for this. The desktop-tab case uses only real input:
+Flow is selected, ArrowRight roves to the unselected Agent tab, the sheet opens
+by pointer at 390px and the window widens to 1280px. It requires focus and a 3px
+ring on the selected tab, exactly one tablist stop counted with real Tab presses,
+Tab out of the tablist and Shift+Tab back, under reduced and full motion. A
+further loader fixture patches no timer: every API request stays unanswered, so
+the app's own 9500ms watchdog must dismiss the loader after the real 8000ms
+deadline fails `/healthz` and while the Flow request is still pending. Emulated
+insets are not a real-device notch test.
+
 ## Publication
 
 The sole `.github/workflows/hf-space.yml` writer remains pinned to reusable

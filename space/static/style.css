@@ -182,7 +182,8 @@ input[type=range]{width:100%;accent-color:var(--accent);height:44px}
   box-shadow:var(--shadow);cursor:pointer}
 .sheet-backdrop{position:fixed;inset:0;z-index:55;background:rgba(2,4,9,.6);backdrop-filter:blur(3px)}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface2);backdrop-filter:blur(var(--blur));
-  border-top:1px solid var(--border-s);border-radius:18px 18px 0 0;padding:10px 14px calc(20px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--border-s);border-radius:18px 18px 0 0;
+  padding:10px max(14px,env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));
   box-shadow:var(--shadow);animation:sheetup .26s ease}
 @keyframes sheetup{from{transform:translateY(100%)}to{transform:none}}
 .sheet-grip{width:42px;height:4px;border-radius:99px;background:var(--dim);margin:4px auto 12px}
