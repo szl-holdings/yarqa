@@ -1,0 +1,52 @@
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: Frontdoor browser
+
+# Read-only presentation qualification of the exact static Space sources. The
+# verifier serves six local files over loopback with UNAVAILABLE API fixtures,
+# blocks external and write requests, and never starts the Space app, fetches
+# feeds or holds a credential. Its QA dependencies are hash-locked separately
+# from the Space runtime image.
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontdoor-browser-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  frontdoor-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      # actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Install the declared browser QA environment
+        run: |
+          python -m venv .qa-venv
+          .qa-venv/bin/python -m pip install --no-cache-dir --require-hashes -r .github/requirements/frontdoor-browser.lock
+          .qa-venv/bin/python -m playwright install --with-deps chromium
+      - name: Qualify the static frontdoor in a new output directory
+        run: .qa-venv/bin/python -I tools/verify_frontdoor_browser.py --output "${RUNNER_TEMP}/frontdoor-browser"
+      # actions/upload-artifact v7.0.2
+      - name: Preserve the presentation report and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: yarqa-frontdoor-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/frontdoor-browser
+          if-no-files-found: error
+          retention-days: 30

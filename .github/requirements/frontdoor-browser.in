@@ -1,0 +1,2 @@
+# Browser QA only: never installed into the Space runtime image.
+playwright==1.63.0

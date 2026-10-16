@@ -26,8 +26,8 @@ PYPROJECT = ROOT / "pyproject.toml"
 SPACE_APP = ROOT / "space" / "app.py"
 PACKAGE_INIT = ROOT / "yarqa" / "__init__.py"
 STEP_NAME = "Install, attest, and test the locked graph"
-EXPECTED_RUN_SHA256 = "3756f798e00b41e51b5fed28b6f9f6828542fe70c08e2d7236e2cbd1236d6ffe"
-EXPECTED_WORKFLOW_SHA256 = "95d7a17854f3c6bf1371974e4858aa3ab05fdcffa7597473668559db088667e4"
+EXPECTED_RUN_SHA256 = "74db3e6b9242a937365c66cb0789dcb211daea7935b29a1dbaf41562c802b441"
+EXPECTED_WORKFLOW_SHA256 = "44408f070f8a2790ece015b2a05ae74d300b88924ccd23585954d557613bd5ec"
 EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
 
 PACKAGE_INSTALL = re.compile(
@@ -225,7 +225,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
             self.assertEqual(requirement, ci[name], name)
 
         expected_versions = {
-            "fastapi": "0.141.1",
+            "fastapi": "0.143.0",
             "httpx": "0.28.1",
             "pip": "26.2.1",
             "pytest": "9.1.1",

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-szl-space-no-shell>
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>yarqa · plug-flow compartments — live or sample, always honest</title>
 <meta name="description" content="yarqa Space — an engineering-method (CFD) plug-flow compartmentalizer with sovereign vendored THREE r160 3D, an agentic sense->route->gate->receipt loop, an append-only tamper-evident receipt chain, an honest PROJECTED forecast, and live license-clean ocean/wind feeds (Open-Meteo, NOAA CO-OPS). Engineering method, not a locked theorem." />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a1020'/><path d='M5 22 Q11 6 16 16 T27 10' stroke='%2340e0c5' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='27' cy='10' r='2.4' fill='%23ffb13f'/></svg>" />
@@ -11,12 +11,13 @@
   <link rel="stylesheet" href="./szl-space-hologram.css" data-szl-space-holo-v2="style" />
 </head>
 <body data-tab="flow">
+  <a class="szl-space-skip-link" data-szl-space-skip href="#main">Skip to Yarqa workspace</a>
   <!-- ===== loader ===== -->
-  <div id="loader"><div class="ring" aria-hidden="true"></div><div class="lt">initializing yarqa · vendored THREE r160</div></div>
+  <div id="loader" role="status"><div class="ring" aria-hidden="true"></div><div class="lt">initializing yarqa · vendored THREE r160</div></div>
 
   <!-- ===== top bar ===== -->
   <header class="topbar">
-    <a class="brand" href="#" aria-label="yarqa home">
+    <a class="brand" href="#panel-flow" data-go="flow" aria-label="yarqa home">
       <svg class="logo" viewBox="0 0 32 32" aria-hidden="true" width="30" height="30">
         <rect width="32" height="32" rx="7" fill="none"/>
         <path d="M4 23 Q11 5 16 16 T28 9" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/>
@@ -27,51 +28,58 @@
     <div class="tier-pill" title="Doctrine v11 honesty tier">
       <span class="dot"></span>engineering method · CFD
     </div>
-    <div class="health" id="healthPill" title="/healthz source of truth">
+    <div class="health" role="status" id="healthPill" title="/healthz source of truth">
       <span class="hdot" id="hdot"></span><span id="htxt">checking /healthz…</span>
     </div>
+    <a class="szl-identity" href="https://a-11-oy.com" aria-label="SZL Holdings · A11oy Command"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" role="img" aria-labelledby="szl-icon-32-title szl-icon-32-desc"><title id="szl-icon-32-title">SZL Holdings</title><desc id="szl-icon-32-desc">SZL letters, one orbit and the coral node, for placements of 24 to 48 pixels.</desc><rect width="600" height="600" rx="120" fill="#030F29"/><ellipse cx="300" cy="300" rx="262" ry="122" fill="none" stroke="#9AA7BD" stroke-width="22" transform="rotate(-22 300 300)"/><g transform="translate(300 300) scale(1.2) translate(-299.8 -299.1)"><g fill="#030F29" stroke="#030F29" stroke-width="18.33" stroke-linejoin="round"><path d="M228.256 331.049Q228.256 353.967 211.26 366.091Q194.265 378.214 161.383 378.214Q131.378 378.214 114.328 367.586Q97.278 356.957 92.406 335.367L123.96 330.163Q127.171 342.564 136.471 348.155Q145.771 353.746 162.268 353.746Q196.48 353.746 196.48 332.931Q196.48 326.288 192.549 321.97Q188.619 317.652 181.478 314.774Q174.336 311.895 154.075 307.798Q136.582 303.702 129.718 301.211Q122.853 298.72 117.317 295.343Q111.781 291.966 107.906 287.205Q104.031 282.444 101.872 276.023Q99.713 269.601 99.713 261.297Q99.713 240.15 115.601 228.913Q131.489 217.675 161.825 217.675Q190.833 217.675 205.392 226.754Q219.952 235.833 224.159 256.758L192.494 261.076Q190.058 251.001 182.585 245.908Q175.111 240.815 161.161 240.815Q131.489 240.815 131.489 259.415Q131.489 265.505 134.644 269.38Q137.8 273.255 144 275.967Q150.2 278.68 169.133 282.776Q191.608 287.537 201.296 291.578Q210.984 295.62 216.63 300.989Q222.277 306.359 225.266 313.833Q228.256 321.306 228.256 331.049Z"/><path d="M369.087 376H243.867V352.86L328.233 245.576H252.281V220H364.548V242.697L280.182 350.424H369.087Z"/><path d="M390.788 376V220H423.449V350.757H507.151V376Z"/></g><g fill="#FFFFFF"><path d="M228.256 331.049Q228.256 353.967 211.26 366.091Q194.265 378.214 161.383 378.214Q131.378 378.214 114.328 367.586Q97.278 356.957 92.406 335.367L123.96 330.163Q127.171 342.564 136.471 348.155Q145.771 353.746 162.268 353.746Q196.48 353.746 196.48 332.931Q196.48 326.288 192.549 321.97Q188.619 317.652 181.478 314.774Q174.336 311.895 154.075 307.798Q136.582 303.702 129.718 301.211Q122.853 298.72 117.317 295.343Q111.781 291.966 107.906 287.205Q104.031 282.444 101.872 276.023Q99.713 269.601 99.713 261.297Q99.713 240.15 115.601 228.913Q131.489 217.675 161.825 217.675Q190.833 217.675 205.392 226.754Q219.952 235.833 224.159 256.758L192.494 261.076Q190.058 251.001 182.585 245.908Q175.111 240.815 161.161 240.815Q131.489 240.815 131.489 259.415Q131.489 265.505 134.644 269.38Q137.8 273.255 144 275.967Q150.2 278.68 169.133 282.776Q191.608 287.537 201.296 291.578Q210.984 295.62 216.63 300.989Q222.277 306.359 225.266 313.833Q228.256 321.306 228.256 331.049Z"/><path d="M369.087 376H243.867V352.86L328.233 245.576H252.281V220H364.548V242.697L280.182 350.424H369.087Z"/><path d="M390.788 376V220H423.449V350.757H507.151V376Z"/></g></g><circle cx="373.69" cy="154.05" r="30" fill="#DF735F"/></svg></a>
   </header>
 
   <!-- ===== desktop/tablet tab rail ===== -->
   <nav class="tabs" id="tabs" role="tablist" aria-label="yarqa capabilities">
-    <button class="tab is-active" role="tab" data-go="flow"><span class="ti">◊</span>Flow Compartments<small>3D hero</small></button>
-    <button class="tab" role="tab" data-go="agent"><span class="ti">⇄</span>Agentic Loop<small>sense·route·gate·receipt</small></button>
-    <button class="tab" role="tab" data-go="chain"><span class="ti">⛓</span>Receipt Chain<small>verify · tamper</small></button>
-    <button class="tab" role="tab" data-go="forecast"><span class="ti">↗</span>Forecast<small>PROJECTED only</small></button>
-    <button class="tab" role="tab" data-go="live"><span class="ti">◉</span>Live Data<small>feeds · cited</small></button>
+    <button class="tab is-active" role="tab" id="tab-flow" aria-controls="panel-flow" aria-selected="true" tabindex="0" data-go="flow"><span class="ti">◊</span>Flow Compartments<small>3D hero</small></button>
+    <button class="tab" role="tab" id="tab-agent" aria-controls="panel-agent" aria-selected="false" tabindex="-1" data-go="agent"><span class="ti">⇄</span>Agentic Loop<small>sense·route·gate·receipt</small></button>
+    <button class="tab" role="tab" id="tab-chain" aria-controls="panel-chain" aria-selected="false" tabindex="-1" data-go="chain"><span class="ti">⛓</span>Receipt Chain<small>verify · tamper</small></button>
+    <button class="tab" role="tab" id="tab-forecast" aria-controls="panel-forecast" aria-selected="false" tabindex="-1" data-go="forecast"><span class="ti">↗</span>Forecast<small>PROJECTED only</small></button>
+    <button class="tab" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1" data-go="live"><span class="ti">◉</span>Live Data<small>feeds · cited</small></button>
   </nav>
 
-  <main id="main">
+  <main id="main" tabindex="-1">
     <!-- ============ TAB 1: FLOW COMPARTMENTS (3D) ============ -->
-    <section class="panel is-active" id="panel-flow" role="tabpanel">
+    <section class="panel is-active" id="panel-flow" role="tabpanel" aria-labelledby="tab-flow" tabindex="-1">
       <div class="canvas-wrap">
-        <canvas id="scene"></canvas>
+        <canvas id="scene" tabindex="0" role="img" aria-label="Compartment field · use arrow keys to rotate" aria-describedby="flowHelp"></canvas>
         <div class="canvas-overlay">
-          <span class="badge" id="flowBadge">…</span>
+          <span class="badge unavailable" role="status" id="flowBadge">UNAVAILABLE</span>
           <span class="chip" id="flowCount">— compartments</span>
         </div>
       </div>
       <aside class="side">
+        <p class="eyebrow">Yarqa / Engineering field</p>
         <h2>Flow Compartments <span class="muted">3D</span></h2>
         <p class="lede">A velocity field built from <b>live</b> (or clearly SAMPLE) ocean+wind feeds, partitioned by <code>yarqa.compartmentalize</code> and rendered in sovereign vendored THREE r160 — colored by compartment label.</p>
         <div class="ctl">
-          <label>align_threshold <output id="alignOut">0.20</output></label>
+          <label for="align">align_threshold <output id="alignOut" for="align">0.20</output></label>
           <input type="range" id="align" min="0" max="0.9" step="0.05" value="0.2" />
         </div>
         <div class="ctl">
-          <label>top-k compartments <output id="kOut">8</output></label>
+          <label for="topk">top-k compartments <output id="kOut" for="topk">8</output></label>
           <input type="range" id="topk" min="1" max="16" step="1" value="8" />
         </div>
+        <p class="scene-help" id="flowHelp">Drag or use the arrow keys to rotate. The numerical summary below provides the returned compartment evidence.</p>
+        <button class="btn" id="toggleMotion" type="button" aria-pressed="false">Pause rotation</button>
+        <p class="scene-state" id="flowRenderState" role="status">3D view awaiting data</p>
+        <details class="flow-data"><summary>Compartment data</summary><div class="table-region" tabindex="0" role="region" aria-label="Top compartments returned by the API"><table class="fc-table" id="flowTable"><caption>Compartment data UNAVAILABLE</caption></table></div></details>
         <div class="receipt" id="flowReceipt"><span class="rlabel">receipt digest</span><code id="flowDigest">—</code></div>
         <p class="honest">Receipt asserts <b>reproducibility / integrity</b>, not correctness. Not a proof, not a locked theorem.</p>
         <div class="legend" id="flowLegend"></div>
+        <footer class="source-note"><a href="https://github.com/szl-holdings/yarqa">Yarqa source</a><a href="https://huggingface.co/spaces/SZLHOLDINGS/yarqa">Space card</a><span>SZL Orbit artwork: <a href="https://github.com/szl-holdings/szl-brand/blob/27d12e77fc0f9f1a0e5fae8b34adf2380d51d070/kit/logos/orbit-v2/suite/szl-icon-32.svg">source</a> · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Software: Apache-2.0.</span></footer>
       </aside>
     </section>
 
     <!-- ============ TAB 2: AGENTIC LOOP ============ -->
-    <section class="panel" id="panel-agent" role="tabpanel">
+    <section class="panel" id="panel-agent" role="tabpanel" aria-labelledby="tab-agent" tabindex="-1">
       <div class="content">
-        <h2>Agentic Loop <span class="badge" id="agentBadge">…</span></h2>
+        <h2>Agentic Loop <span class="badge unavailable" role="status" id="agentBadge">UNAVAILABLE</span></h2>
         <p class="lede">A governed <b>sense → route → gate → receipt</b> loop. Each observation is routed (top-k MoE-style over flow compartments), passed through a two-key gate, and recorded as one append-only receipt. Conforms to the <b>SHAPE</b> of P1/P2/P4 — an engineering loop, not a proof.</p>
         <div class="loop-diagram" aria-hidden="true">
           <div class="node">sense</div><span class="arr">→</span>
@@ -83,21 +91,21 @@
           <button class="btn primary" id="runLoop">▶ Run loop</button>
           <span class="chip" id="agentExperts">— experts</span>
         </div>
-        <div class="log" id="agentLog"></div>
+        <div class="log" id="agentLog" aria-live="polite"></div>
         <p class="honest">Integrity receipts only. The gate decides ALLOW/DENY; it does not assert the decision is <i>correct</i>.</p>
       </div>
     </section>
 
     <!-- ============ TAB 3: RECEIPT CHAIN ============ -->
-    <section class="panel" id="panel-chain" role="tabpanel">
+    <section class="panel" id="panel-chain" role="tabpanel" aria-labelledby="tab-chain" tabindex="-1">
       <div class="content">
-        <h2>Receipt Chain <span class="badge" id="chainBadge">…</span></h2>
+        <h2>Receipt Chain <span class="badge unavailable" role="status" id="chainBadge">UNAVAILABLE</span></h2>
         <p class="lede">An append-only, hash-linked log: each link commits to the previous (<code>prev_digest → digest</code>). Editing, reordering, inserting, or deleting any step breaks the chain. This is the visibility/control story — <b>integrity & ordering</b>, never correctness.</p>
         <div class="row">
           <button class="btn primary" id="buildChain">⟳ Build chain</button>
           <button class="btn" id="verifyChain">✓ Verify</button>
           <button class="btn danger" id="tamperChain">✸ Tamper a link</button>
-          <span class="verdict" id="chainVerdict">—</span>
+          <span class="verdict" role="status" id="chainVerdict">—</span>
         </div>
         <div class="chain" id="chainView"></div>
         <p class="honest">Plain hash chain (not a signed/anchored ledger). Khipu = Conjecture 2; signing/anchoring is the platform's job.</p>
@@ -105,26 +113,26 @@
     </section>
 
     <!-- ============ TAB 4: FORECAST ============ -->
-    <section class="panel" id="panel-forecast" role="tabpanel">
+    <section class="panel" id="panel-forecast" role="tabpanel" aria-labelledby="tab-forecast" tabindex="-1">
       <div class="content">
-        <h2>Forecast <span class="badge" id="fcBadge">…</span></h2>
+        <h2>Forecast <span class="badge unavailable" role="status" id="fcBadge">UNAVAILABLE</span></h2>
         <p class="lede">Short-horizon trend of compartment count and mean flow from the <b>live/sample</b> series. Everything beyond the data is labeled <b class="proj">PROJECTED</b> — a linear extrapolation, never an invented number, never a guarantee.</p>
         <div class="ctl inline">
-          <label>horizon <output id="hzOut">6</output></label>
+          <label for="hz">horizon <output id="hzOut" for="hz">6</output></label>
           <input type="range" id="hz" min="1" max="12" step="1" value="6" />
           <button class="btn" id="refreshFc">↻ Recompute</button>
         </div>
-        <canvas id="fcChart" height="240"></canvas>
+        <canvas id="fcChart" height="240" role="img" aria-label="Mean flow history and projection; numerical values in the following table"></canvas>
         <div class="fc-legend"><span class="sw data"></span>DATA <span class="sw proj"></span>PROJECTED</div>
-        <table class="fc-table" id="fcTable"></table>
+        <div class="table-region" tabindex="0" role="region" aria-label="Forecast values"><table class="fc-table" id="fcTable"><caption>Forecast data UNAVAILABLE</caption></table></div>
         <p class="honest">Linear least-squares fit. The dashed PROJECTED segment is a projection only.</p>
       </div>
     </section>
 
     <!-- ============ TAB 5: LIVE DATA ============ -->
-    <section class="panel" id="panel-live" role="tabpanel">
+    <section class="panel" id="panel-live" role="tabpanel" aria-labelledby="tab-live" tabindex="-1">
       <div class="content">
-        <h2>Live Data <span class="badge" id="liveBadge">…</span></h2>
+        <h2>Live Data <span class="badge unavailable" role="status" id="liveBadge">UNAVAILABLE</span></h2>
         <p class="lede">The real maritime/flow feeds powering yarqa. Each source is independently <b>LIVE</b> when reachable, else clearly <b>SAMPLE / SIMULATED</b> — with the source URL cited. One code path; the badge follows real reachability.</p>
         <div class="row"><button class="btn" id="refreshFeeds">↻ Refresh feeds</button></div>
         <div class="feeds" id="feedCards"></div>
@@ -134,15 +142,16 @@
   </main>
 
   <!-- ===== mobile FAB + bottom-sheet drawer ===== -->
-  <button class="fab" id="fab" aria-label="Open navigation" aria-expanded="false">☰</button>
+  <button class="fab" id="fab" aria-label="Open navigation" aria-expanded="false" aria-controls="sheet">☰</button>
   <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
   <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Navigate tabs" hidden>
-    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="sheet-heading"><h2>Yarqa workspaces</h2><button class="btn" id="closeSheet" type="button">Close</button></div>
     <button class="sheet-item" data-go="flow"><span class="ti">◊</span>Flow Compartments <small>3D hero</small></button>
     <button class="sheet-item" data-go="agent"><span class="ti">⇄</span>Agentic Loop <small>sense·route·gate·receipt</small></button>
     <button class="sheet-item" data-go="chain"><span class="ti">⛓</span>Receipt Chain <small>verify · tamper</small></button>
     <button class="sheet-item" data-go="forecast"><span class="ti">↗</span>Forecast <small>PROJECTED only</small></button>
     <button class="sheet-item" data-go="live"><span class="ti">◉</span>Live Data <small>feeds · cited</small></button>
+    <nav class="sheet-sources" aria-label="Source and ecosystem"><a href="https://github.com/szl-holdings/yarqa">Source</a><a href="https://a-11-oy.com">A11oy Command</a><a href="https://a11oy.net">Evidence</a></nav>
   </div>
 
   <script src="./lib/three.min.js"></script>
