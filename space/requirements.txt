@@ -1,7 +1,7 @@
 numpy>=1.23
 fastapi>=0.143.0
 uvicorn[standard]>=0.54.0
-pydantic>=2.13.5
+pydantic>=2.14.1
 pip==26.2.1
 setuptools==84.1.0
 wheel==0.48.0
