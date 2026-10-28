@@ -26,8 +26,8 @@ PYPROJECT = ROOT / "pyproject.toml"
 SPACE_APP = ROOT / "space" / "app.py"
 PACKAGE_INIT = ROOT / "yarqa" / "__init__.py"
 STEP_NAME = "Install, attest, and test the locked graph"
-EXPECTED_RUN_SHA256 = "74db3e6b9242a937365c66cb0789dcb211daea7935b29a1dbaf41562c802b441"
-EXPECTED_WORKFLOW_SHA256 = "44408f070f8a2790ece015b2a05ae74d300b88924ccd23585954d557613bd5ec"
+EXPECTED_RUN_SHA256 = "6a8d06881827ec8c9a078f6c985ef3adaf2011307fe210f0388705efd3132a90"
+EXPECTED_WORKFLOW_SHA256 = "0b5a0911de93dd52b177bb3e9327d9d4c3bd4db9fced7e7cb590073907250331"
 EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
 
 PACKAGE_INSTALL = re.compile(
@@ -229,7 +229,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
             "httpx": "0.28.1",
             "pip": "26.2.1",
             "pytest": "9.1.1",
-            "setuptools": "84.0.0",
+            "setuptools": "84.1.0",
             "uvicorn": "0.54.0",
             "wheel": "0.48.0",
         }
@@ -243,7 +243,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         assert tomllib is not None
         project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
         self.assertEqual(
-            ["setuptools==84.0.0", "wheel==0.48.0"],
+            ["setuptools==84.1.0", "wheel==0.48.0"],
             project["build-system"]["requires"],
         )
         test_extra = set(project["project"]["optional-dependencies"]["test"])
@@ -252,7 +252,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
                 "httpx==0.28.1",
                 "pip==26.2.1",
                 "pytest==9.1.1",
-                "setuptools==84.0.0",
+                "setuptools==84.1.0",
                 "wheel==0.48.0",
             }.issubset(test_extra)
         )
@@ -261,7 +261,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         production = _lock_entries(PRODUCTION_LOCK)
         expected_build_tools = {
             "pip": "26.2.1",
-            "setuptools": "84.0.0",
+            "setuptools": "84.1.0",
             "wheel": "0.48.0",
         }
         self.assertEqual(
