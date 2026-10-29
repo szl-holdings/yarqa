@@ -10,7 +10,7 @@ name = "yarqa"
 version = "0.5.0"
 description = "Plug-flow compartmentalization for compartmental models (clean-room, Apache-2.0)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "SZL Holdings" }]
 dependencies = ["numpy>=1.23"]
