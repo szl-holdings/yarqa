@@ -58,6 +58,8 @@ real velocity field that feeds `yarqa.compartmentalize`.
 
 ## Run locally
 
+The package requires Python 3.10 or newer because Pydantic 2.14 does. The Space image and Space CI run on Python 3.11. The other workflows run on Python 3.12.
+
 ```bash
 pip install -e .                      # the yarqa package (repo root)
 pip install -r space/requirements.txt

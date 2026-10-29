@@ -26,8 +26,8 @@ PYPROJECT = ROOT / "pyproject.toml"
 SPACE_APP = ROOT / "space" / "app.py"
 PACKAGE_INIT = ROOT / "yarqa" / "__init__.py"
 STEP_NAME = "Install, attest, and test the locked graph"
-EXPECTED_RUN_SHA256 = "6a8d06881827ec8c9a078f6c985ef3adaf2011307fe210f0388705efd3132a90"
-EXPECTED_WORKFLOW_SHA256 = "0b5a0911de93dd52b177bb3e9327d9d4c3bd4db9fced7e7cb590073907250331"
+EXPECTED_RUN_SHA256 = "be45ce4a580af17abea38452496b4d7adcfc5086b67eb03c157d554345fd5122"
+EXPECTED_WORKFLOW_SHA256 = "f03282971f5344878bd40acdae343cb01652d5f097477478cfade6a14367eed7"
 EXPECTED_DOCKERFILE_SHA256 = "1181cf43c9f2ab490b83e810b11f00f770e86c3189c8844d3038ffbbfcea0d70"
 
 PACKAGE_INSTALL = re.compile(
@@ -227,9 +227,9 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         expected_versions = {
             "fastapi": "0.143.0",
             "httpx": "0.28.1",
-            "pip": "26.2.1",
+            "pip": "26.2.2",
             "pytest": "9.1.1",
-            "setuptools": "84.1.0",
+            "setuptools": "84.2.1",
             "uvicorn": "0.54.0",
             "wheel": "0.48.0",
         }
@@ -243,16 +243,16 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         assert tomllib is not None
         project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
         self.assertEqual(
-            ["setuptools==84.1.0", "wheel==0.48.0"],
+            ["setuptools==84.2.1", "wheel==0.48.0"],
             project["build-system"]["requires"],
         )
         test_extra = set(project["project"]["optional-dependencies"]["test"])
         self.assertTrue(
             {
                 "httpx==0.28.1",
-                "pip==26.2.1",
+                "pip==26.2.2",
                 "pytest==9.1.1",
-                "setuptools==84.1.0",
+                "setuptools==84.2.1",
                 "wheel==0.48.0",
             }.issubset(test_extra)
         )
@@ -260,8 +260,8 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
     def test_production_build_uses_the_same_exact_hashed_toolchain(self) -> None:
         production = _lock_entries(PRODUCTION_LOCK)
         expected_build_tools = {
-            "pip": "26.2.1",
-            "setuptools": "84.1.0",
+            "pip": "26.2.2",
+            "setuptools": "84.2.1",
             "wheel": "0.48.0",
         }
         self.assertEqual(
