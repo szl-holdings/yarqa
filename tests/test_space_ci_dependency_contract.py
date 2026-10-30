@@ -26,9 +26,9 @@ PYPROJECT = ROOT / "pyproject.toml"
 SPACE_APP = ROOT / "space" / "app.py"
 PACKAGE_INIT = ROOT / "yarqa" / "__init__.py"
 STEP_NAME = "Install, attest, and test the locked graph"
-EXPECTED_RUN_SHA256 = "74db3e6b9242a937365c66cb0789dcb211daea7935b29a1dbaf41562c802b441"
-EXPECTED_WORKFLOW_SHA256 = "7ad2812107f927474b1f717c18a301650fa0144cf67f5400d1c0f8aeea5430df"
-EXPECTED_DOCKERFILE_SHA256 = "6fc4c6627ac06a8a8f51f6ad28653f728d4a70792efcc5db79927173b371e3ed"
+EXPECTED_RUN_SHA256 = "aa6da8b9614306b157879d0de41292c315e8f6b3964ee09f81dd62e9c2db80cc"
+EXPECTED_WORKFLOW_SHA256 = "bcd225a42ab39f05fa4cbdd811d8dae0743849e7a10a57c06bbfd7190148bd20"
+EXPECTED_DOCKERFILE_SHA256 = "1181cf43c9f2ab490b83e810b11f00f770e86c3189c8844d3038ffbbfcea0d70"
 
 PACKAGE_INSTALL = re.compile(
     r"(?ix)(?<![A-Za-z0-9_.-])(?:"
@@ -225,11 +225,11 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
             self.assertEqual(requirement, ci[name], name)
 
         expected_versions = {
-            "fastapi": "0.143.0",
+            "fastapi": "0.159.1",
             "httpx": "0.28.1",
-            "pip": "26.2.1",
+            "pip": "26.2.2",
             "pytest": "9.1.1",
-            "setuptools": "84.0.0",
+            "setuptools": "84.2.1",
             "uvicorn": "0.54.0",
             "wheel": "0.48.0",
         }
@@ -243,16 +243,16 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         assert tomllib is not None
         project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
         self.assertEqual(
-            ["setuptools==84.0.0", "wheel==0.48.0"],
+            ["setuptools==84.2.1", "wheel==0.48.0"],
             project["build-system"]["requires"],
         )
         test_extra = set(project["project"]["optional-dependencies"]["test"])
         self.assertTrue(
             {
                 "httpx==0.28.1",
-                "pip==26.2.1",
+                "pip==26.2.2",
                 "pytest==9.1.1",
-                "setuptools==84.0.0",
+                "setuptools==84.2.1",
                 "wheel==0.48.0",
             }.issubset(test_extra)
         )
@@ -260,8 +260,8 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
     def test_production_build_uses_the_same_exact_hashed_toolchain(self) -> None:
         production = _lock_entries(PRODUCTION_LOCK)
         expected_build_tools = {
-            "pip": "26.2.1",
-            "setuptools": "84.0.0",
+            "pip": "26.2.2",
+            "setuptools": "84.2.1",
             "wheel": "0.48.0",
         }
         self.assertEqual(

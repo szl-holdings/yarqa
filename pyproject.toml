@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-    "setuptools==84.0.0",
+    "setuptools==84.2.1",
     "wheel==0.48.0",
 ]
 build-backend = "setuptools.build_meta"
@@ -10,7 +10,7 @@ name = "yarqa"
 version = "0.5.0"
 description = "Plug-flow compartmentalization for compartmental models (clean-room, Apache-2.0)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "SZL Holdings" }]
 dependencies = ["numpy>=1.23"]
@@ -18,9 +18,9 @@ dependencies = ["numpy>=1.23"]
 [project.optional-dependencies]
 test = [
     "httpx==0.28.1",
-    "pip==26.2.1",
+    "pip==26.2.2",
     "pytest==9.1.1",
-    "setuptools==84.0.0",
+    "setuptools==84.2.1",
     "wheel==0.48.0",
 ]
 
