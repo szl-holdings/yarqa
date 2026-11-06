@@ -74,8 +74,9 @@ cd space && python -m uvicorn app:app --port 7860
 
 Per-request work is bounded: `n_obs` 1–64, `horizon` 1–24, `top_k` 1–128 and
 `align_threshold` −1…1 (the UI stays inside these), and `chain_json` is at most
-262,144 characters. Anything outside them, or a `chain_json` that is not a chain
-returned by `/api/chain`, gets HTTP 422.
+262,144 characters. Anything outside them, or a `chain_json` that is not JSON in
+the shape `/api/chain` returns, gets HTTP 422. A well-formed chain whose links do
+not verify gets HTTP 200 with `verify.ok: false`.
 
 ## Provenance
 

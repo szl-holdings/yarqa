@@ -248,7 +248,12 @@ def test_public_api_accepts_the_ui_ranges_and_the_bounds():
 
 @pytest.mark.parametrize(
     "chain_json",
-    ["not json", "[]", '"text"', '{"links": [1]}', '{"links": [{"index": "x"}]}', "[" * 5000],
+    [
+        "not json", "[]", '"text"', '{"links": [1]}', '{"links": [{"index": "x"}]}',
+        # json.loads yields inf here and int(inf) raises OverflowError, not ValueError
+        '{"links": [{"index": 1e400}]}', '{"links": [{"index": -Infinity}]}',
+        "[" * 5000,
+    ],
 )
 def test_chain_verify_rejects_malformed_chain_json(chain_json):
     r = client.post("/api/chain/verify", json={"chain_json": chain_json})

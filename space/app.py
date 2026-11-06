@@ -384,9 +384,10 @@ class TamperRequest(BaseModel):
 def api_chain_verify(req: TamperRequest) -> JSONResponse:
     try:
         chain = ReceiptChain.from_json(req.chain_json)
-    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+    except (ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError):
         # Not JSON, or not the {"links": [{index, prev_digest, step, digest}]}
-        # shape /api/chain returns: a client error, never a 500.
+        # shape /api/chain returns (OverflowError: a non-finite index such as
+        # 1e400 or Infinity): a client error, never a 500.
         return JSONResponse(
             {"detail": "chain_json is not a receipt chain as returned by /api/chain"},
             status_code=422,
