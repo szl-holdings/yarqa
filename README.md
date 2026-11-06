@@ -27,10 +27,39 @@ Pure-Python + NumPy. No OpenFOAM dependency required (bring your own mesh as
 centers + velocities + neighbor lists). Apache-2.0.
 
 ## Install
+
+`yarqa` is not on PyPI yet (no release has been published), so install it
+from source. NumPy is the only runtime dependency; Python 3.10 or newer.
+
 ```bash
-pip install numpy
-# then add this package to your path / install -e .
+git clone https://github.com/szl-holdings/yarqa.git
+cd yarqa
+python -m pip install -e .            # library + CLI
+python -m pip install -e '.[test]'    # adds the test tooling
 ```
+
+Without a checkout: `python -m pip install "git+https://github.com/szl-holdings/yarqa.git"`.
+
+## Test
+
+```bash
+python -m pytest tests/ -q
+```
+
+`tests/test_space_frontend.py` and `tests/test_receipt_ledger.py` drive Node.js
+fixtures, so `node` must be on `PATH`. `tests/test_attestation.py` and
+`tests/test_prediction_receipt.py` skip (never fake) unless the optional
+`szl_receipt` library is installed; see
+[Surrogate and optional attestation](#surrogate-and-optional-attestation).
+The Space endpoint tests need the Space requirements:
+
+```bash
+python -m pip install -r space/requirements.txt
+python -m pytest space/tests/test_space_endpoints.py -q
+```
+
+CI (`.github/workflows/space-ci.yml`) runs both suites on Python 3.11 from the
+hash-locked `.github/requirements/space-ci.lock`.
 
 ## Operational runtime
 
@@ -93,10 +122,12 @@ verify(mesh, receipt)["ok"]    # True — anyone with the mesh can reproduce + c
 The receipt records input content-hashes, params, code version, and the result
 hash. A third party holding only the mesh + receipt can **deterministically
 replay** the run and confirm the published compartments are exactly what this
-code produces — tamper-evident on inputs, params, or results. Signing itself is
-left to the platform's existing key chain (Ed25519/cosign), so the module stays
-dependency-free. This is an **integrity / reproducibility** guarantee, NOT a
-formal proof of correctness.
+code produces — tamper-evident on inputs, params, or results. `yarqa.provenance`
+itself stays dependency-free (NumPy only); keyless signing lives in
+`yarqa.signing` and needs the optional `sigstore` package (see
+[Signed provenance receipts](#signed-provenance-receipts-sigstore-keyless)).
+This is an **integrity / reproducibility** guarantee, NOT a formal proof of
+correctness.
 
 ## Agentic routing, receipt chains & CLI (v0.4.0, additive)
 Everything below is additive — the v0.3.0 API and all prior tests are unchanged.
@@ -106,6 +137,7 @@ routes an observation to its *k* best-aligned compartments with normalized
 softmax gating weights over their cosine scores (k=1 reproduces argmax):
 ```python
 from yarqa import build_experts, route_topk
+experts = build_experts(mesh, labels)          # one expert per compartment
 rk = route_topk(observation_velocity, experts, k=2, temperature=1.0)
 rk.compartment_ids, rk.weights   # best-first ids; softmax weights summing to 1.0
 ```
@@ -133,6 +165,34 @@ python -m yarqa.cli sample mesh.npz                 # SAMPLE synthetic mesh
 python -m yarqa.cli compartmentalize mesh.npz --receipt r.json
 python -m yarqa.cli verify mesh.npz r.json          # reproduce + confirm
 ```
+
+## Surrogate and optional attestation
+
+`fit_plugflow_surrogate()` runs the real `compartmentalize()` at a few anchor
+thresholds (seven, evenly spaced over 0–0.98, by default) and interpolates the
+compartment count between them. Outside the measured anchor range it returns
+`UNAVAILABLE` with `value=None` instead of extrapolating; inside it reports the
+two bracketing measured counts as an indicative interval, not a guarantee.
+```python
+from yarqa import fit_plugflow_surrogate
+from yarqa.meshio import sample_channel_mesh
+
+surrogate = fit_plugflow_surrogate(sample_channel_mesh(12, 8, seed=0))
+p = surrogate.predict(0.9)
+p.status, p.lower_bound, p.upper_bound   # ('PREDICTED', 29, 30); p.value ≈ 29.51
+surrogate.predict(0.995).status          # 'UNAVAILABLE' (above the 0.98 anchor)
+```
+
+`yarqa.attestation` (`attest_prediction`, `emit_prediction_receipt`, …) wraps a
+prediction in the shared SZL receipt shapes by delegating to the `szl_receipt`
+library, which is not on PyPI. Without it those functions raise
+`AttestationUnavailable` rather than build a receipt themselves. To enable them:
+```bash
+python -m pip install "szl_receipt @ git+https://github.com/szl-holdings/szl-receipt.git@v0.2.0"
+```
+The adapter's tests also pass against szl-receipt v0.3.4, whose distribution is
+named `szl-receipt-dsse`. `emit_prediction_receipt()` without a private key
+returns an honestly unsigned envelope.
 
 ## Provenance & honesty
 Clean-room implementation from a published algorithm description — no third-party
@@ -168,9 +228,12 @@ ny, seed, align_threshold`), so any third party can regenerate the mesh,
 reconstruct the receipt, and confirm via `yarqa.verify()` that the result
 reproduces — independent of any data we host.
 
-The `receipt-sign` workflow runs this on every push to the default branch (`main`) and publishes
-each signed receipt to the append-only `governance-receipts` branch
-(`receipts/<sha256>.dsse.json`).
+The `receipt-sign` workflow runs this on pull requests and pushes to `main`
+that change the package, the signing scripts, their lock
+(`requirements/ci/receipt-sign.txt`) or the workflow. On those pushes a
+separate `publish-ledger` job, the only one holding a write token, appends each
+verified receipt to the append-only `governance-receipts` branch
+(`receipts/<sha256>.dsse.json`) and fails the run if it cannot.
 
 **Honesty:** this signs the receipt, nothing more. `yarqa` is an
 engineering-method / CFD tool — receipts attest **integrity + reproducibility**,
@@ -181,4 +244,4 @@ with `--allow-placeholder`).
 
 ---
 
-**Explore the SZL estate:** [a11oy console](https://a-11-oy.com) · [LLM Router](https://github.com/szl-holdings/szl-router) · [Receipt format spec](https://github.com/szl-holdings/governed-receipt-spec) · [Lean proofs](https://github.com/szl-holdings/lutar-lean) · [Docs](https://github.com/szl-holdings/docs-site) · [🤗 SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS)
+**Explore the SZL estate:** [a11oy console](https://a-11-oy.com) · [LLM Router](https://github.com/szl-holdings/szl-router) · [Receipt format spec](https://github.com/szl-holdings/governed-receipt-spec) · [Lean proofs](https://github.com/szl-holdings/lutar-lean) · [Docs (archived)](https://github.com/szl-holdings/docs-site) · [🤗 SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS)

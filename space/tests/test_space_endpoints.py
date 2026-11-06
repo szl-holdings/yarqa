@@ -276,6 +276,17 @@ def test_chain_verify_never_tampers_a_non_object_step():
     assert r.json()["tampered"] is False
     assert r.json()["verify"]["ok"] is False  # the forged digest still fails
 
+
+def test_space_readme_states_the_enforced_bounds():
+    readme = " ".join((_SPACE / "README.md").read_text(encoding="utf-8").split())
+    for fragment in (
+        f"`n_obs` 1–{space_app.MAX_OBSERVATIONS}",
+        f"`horizon` 1–{space_app.MAX_HORIZON}",
+        f"`top_k` 1–{space_app.MAX_TOP_K}",
+        f"at most {space_app.MAX_CHAIN_JSON_CHARS:,} characters",
+    ):
+        assert fragment in readme, fragment
+
 def test_forecast_labels_projected_honestly():
     j = client.get("/api/forecast?horizon=6").json()
     assert j["state"] in VALID_STATES
