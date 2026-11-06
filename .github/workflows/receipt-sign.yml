@@ -13,7 +13,14 @@
 # OIDC token, so every other runtime keeps the honest placeholder.
 #
 # Org policy permits only github-owned / verified actions, so Sigstore signing is
-# driven by `pip install sigstore` + the repo's own scripts.
+# driven by the hash-locked `sigstore` package + the repo's own scripts.
+#
+# Least privilege: `sign-and-verify` installs requirements/ci/receipt-sign.txt
+# with --require-hashes and runs package code holding `id-token: write` and a
+# read-only token. Only `publish-ledger` (pushes to main) holds
+# `contents: write`; it installs nothing and appends the verified envelope to
+# the governance-receipts branch with .github/scripts/publish_receipt_ledger.cjs.
+# A failed ledger append fails the run (tests/test_receipt_ledger.py).
 
 name: Receipt Sign (Sigstore keyless)
 
@@ -25,6 +32,8 @@ on:
       - "scripts/sign_receipt.py"
       - "scripts/verify_receipt.py"
       - "tests/test_signing.py"
+      - "requirements/ci/receipt-sign.txt"
+      - ".github/scripts/publish_receipt_ledger.cjs"
       - ".github/workflows/receipt-sign.yml"
   pull_request:
     branches: [main, master]
@@ -33,6 +42,8 @@ on:
       - "scripts/sign_receipt.py"
       - "scripts/verify_receipt.py"
       - "tests/test_signing.py"
+      - "requirements/ci/receipt-sign.txt"
+      - ".github/scripts/publish_receipt_ledger.cjs"
       - ".github/workflows/receipt-sign.yml"
   workflow_dispatch:
   release:
@@ -47,22 +58,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write   # publish the signed receipt to the ledger branch (push to default branch only)
+      contents: read
       id-token: write   # REQUIRED: the ambient OIDC token Fulcio exchanges for a cert
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
-      - name: Install yarqa + sigstore
+      - name: Install hash-locked signing dependencies, then yarqa
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install "sigstore>=2.0.0" "pytest>=7"
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/ci/receipt-sign.txt
+          python -m pip install --disable-pip-version-check --no-deps -e .
 
       - name: Offline self-test (no signature)
         run: python -m pytest -q tests/test_signing.py
@@ -78,10 +90,12 @@ jobs:
           echo "Signed envelope: ${envelope}"
 
       - name: Independently verify (Fulcio + Rekor + DSSE) and reproduce the run
+        env:
+          ENVELOPE: ${{ steps.locate.outputs.envelope }}
         run: |
           identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/receipt-sign.yml@${GITHUB_REF}"
           echo "Expected signer identity: ${identity}"
-          python scripts/verify_receipt.py "${{ steps.locate.outputs.envelope }}" \
+          python scripts/verify_receipt.py "${ENVELOPE}" \
             --identity "${identity}" \
             --issuer "https://token.actions.githubusercontent.com" \
             --replay
@@ -93,45 +107,31 @@ jobs:
           path: attestations/yarqa/*.dsse.json
           if-no-files-found: error
 
+  publish-ledger:
+    name: Append the verified receipt to the governance-receipts ledger
+    needs: sign-and-verify
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # append the signed receipt to the governance-receipts ledger branch
+    steps:
+      - name: Checkout the ledger publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the verified envelope
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: yarqa-dsse-receipt
+          path: ${{ runner.temp }}/yarqa-dsse-receipt
+
       - name: Publish signed receipt to ledger branch
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          ENVELOPE: ${{ steps.locate.outputs.envelope }}
+          ENVELOPE_DIR: ${{ runner.temp }}/yarqa-dsse-receipt
         with:
           script: |
-            const fs = require('fs');
-            const branch = 'governance-receipts';
-            const { owner, repo } = context.repo;
-            const envelope = JSON.parse(fs.readFileSync(process.env.ENVELOPE, 'utf8'));
-            if (envelope._mode !== 'SIGSTORE-KEYLESS') {
-              core.info(`Envelope mode is '${envelope._mode}', not a real signature -- not publishing.`);
-              return;
-            }
-            envelope._signer_identity = `https://github.com/${owner}/${repo}/.github/workflows/receipt-sign.yml@${context.ref}`;
-            envelope._signer_issuer = 'https://token.actions.githubusercontent.com';
-
-            // ensure the append-only ledger branch exists (branch from default on first use)
-            try {
-              await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
-            } catch (e) {
-              const meta = await github.rest.repos.get({ owner, repo });
-              const defRef = await github.rest.git.getRef({ owner, repo, ref: `heads/${meta.data.default_branch}` });
-              await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: defRef.data.object.sha });
-              core.info(`Created ledger branch ${branch}`);
-            }
-
-            const ledgerPath = `receipts/${envelope._szl.receipt_sha256}.dsse.json`;
-            const content = Buffer.from(JSON.stringify(envelope, null, 2)).toString('base64');
-            let existingSha;
-            try {
-              const cur = await github.rest.repos.getContent({ owner, repo, path: ledgerPath, ref: branch });
-              existingSha = cur.data.sha;
-            } catch (e) { /* new file */ }
-            await github.rest.repos.createOrUpdateFileContents({
-              owner, repo, path: ledgerPath, branch,
-              message: `receipt: publish signed yarqa receipt ${envelope._szl.receipt_sha256.slice(0, 12)}`,
-              content, sha: existingSha,
-            });
-            core.info(`Published ${ledgerPath} to ${branch}`);
+            const publish = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/publish_receipt_ledger.cjs`);
+            await publish({ github, context, core, envelopeDir: process.env.ENVELOPE_DIR });

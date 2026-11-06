@@ -69,8 +69,14 @@ cd space && python -m uvicorn app:app --port 7860
 
 ## Endpoints
 
-`/healthz` · `/api/feeds` · `/api/compartments` · `/api/agentic` ·
-`/api/chain` · `POST /api/chain/verify` · `/api/forecast`
+`/healthz` · `/livez` · `/api/build-info` · `/api/feeds` · `/api/compartments` ·
+`/api/agentic` · `/api/chain` · `POST /api/chain/verify` · `/api/forecast`
+
+Per-request work is bounded: `n_obs` 1–64, `horizon` 1–24, `top_k` 1–128 and
+`align_threshold` −1…1 (the UI stays inside these), and `chain_json` is at most
+262,144 characters. Anything outside them, or a `chain_json` that is not JSON in
+the shape `/api/chain` returns, gets HTTP 422. A well-formed chain whose links do
+not verify gets HTTP 200 with `verify.ok: false`.
 
 ## Provenance
 

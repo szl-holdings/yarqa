@@ -1,0 +1,19 @@
+yarqa
+Copyright 2026 SZL Holdings
+
+This product includes software developed at SZL Holdings
+(https://github.com/szl-holdings), licensed under the Apache License,
+Version 2.0 (see LICENSE).
+
+Third-party material distributed in this repository (not in the yarqa wheel):
+
+* three.js r160, vendored verbatim as space/static/lib/three.min.js.
+  Copyright 2010-2023 three.js authors. MIT License; the full text is in
+  space/static/lib/THREE_LICENSE.txt.
+* The SZL Orbit v2 mark inlined in space/static/index.html, from
+  szl-brand@27d12e77fc0f9f1a0e5fae8b34adf2380d51d070
+  (kit/logos/orbit-v2/suite/szl-icon-32.svg), licensed CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/).
+
+Data the Space reads at run time (not redistributed here): Open-Meteo
+(CC BY 4.0) and NOAA CO-OPS (U.S. public domain).
