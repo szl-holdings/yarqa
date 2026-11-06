@@ -70,9 +70,9 @@ def _require_szl_receipt():
         from szl_receipt import attest  # type: ignore
     except Exception as exc:  # pragma: no cover - exercised only without the lib
         raise AttestationUnavailable(
-            "szl_receipt (v0.2.0) is not installed; install "
-            "`szl_receipt @ git+https://github.com/szl-holdings/szl-receipt.git"
-            "@v0.2.0` (the `attest` extra) to attest yarqa surrogate predictions. "
+            "szl_receipt (v0.2.0) is not installed; install it with "
+            "`pip install 'szl_receipt @ git+https://github.com/szl-holdings/"
+            "szl-receipt.git@v0.2.0'` to attest yarqa surrogate predictions. "
             "Refusing to duplicate the shared receipt shapes."
         ) from exc
     return szl_receipt, attest

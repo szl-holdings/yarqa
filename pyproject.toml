@@ -11,8 +11,32 @@ version = "0.5.0"
 description = "Plug-flow compartmentalization for compartmental models (clean-room, Apache-2.0)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "SZL Holdings" }]
+keywords = [
+    "cfd",
+    "compartment-model",
+    "plug-flow",
+    "reactor-engineering",
+    "provenance",
+    "receipts",
+    "sigstore",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = ["numpy>=1.23"]
 
 [project.optional-dependencies]

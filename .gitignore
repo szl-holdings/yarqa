@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 .idea/
 attestations/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
