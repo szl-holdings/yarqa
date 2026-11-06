@@ -12,6 +12,7 @@ Architecture (doctrine v11 honest):
 Endpoints:
   GET /api/build-info             — exact protected GitHub source identity
   GET /healthz                  — source-of-truth health + feed states
+  GET /livez                    — local process liveness (no feed access)
   GET /api/compartments         — 3D field from live/sample feeds + receipt
   GET /api/agentic              — one sense->route->gate->receipt loop, AgentSteps
   GET /api/chain                — append-only hash-linked receipt chain
@@ -24,14 +25,14 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # The production image installs Yarqa as a wheel. Do not add the repository
 # parent to sys.path here: /app/yarqa must never shadow the installed package.
@@ -140,6 +141,24 @@ CLAIM_TIER = (
 
 _SOURCE_REVISION_FILE = Path("/usr/share/szl/source-revision")
 
+# ---------------------------------------------------------------------------
+# Request bounds. The Space is public and anonymous, and the endpoints below run
+# compartmentalize() or one agent step per requested observation or horizon
+# point, so an unbounded count is an unbounded CPU and memory request. The
+# limits sit above every value the UI sends (align 0-0.9, top_k 1-16, horizon
+# 1-12, n_obs 5-6); FastAPI answers anything outside them with HTTP 422 before
+# any feed is read or any compartment is computed.
+# ---------------------------------------------------------------------------
+MAX_OBSERVATIONS = 64
+MAX_HORIZON = 24
+MAX_TOP_K = 128  # the feed grid has 14 x 9 = 126 cells
+MAX_CHAIN_JSON_CHARS = 262_144
+
+AlignThreshold = Annotated[float, Query(ge=-1.0, le=1.0)]
+TopK = Annotated[int, Query(ge=1, le=MAX_TOP_K)]
+Observations = Annotated[int, Query(ge=1, le=MAX_OBSERVATIONS)]
+Horizon = Annotated[int, Query(ge=1, le=MAX_HORIZON)]
+
 
 def _build_identity() -> dict[str, str | None]:
     """Return only the immutable source identity baked into the image."""
@@ -233,7 +252,7 @@ def api_feeds(force: bool = False) -> JSONResponse:
 # Tab 1: Flow Compartments (3D) — field from feeds + signed-ready receipt
 # ---------------------------------------------------------------------------
 @app.get("/api/compartments")
-def api_compartments(align_threshold: float = 0.2, top_k: int = 8) -> JSONResponse:
+def api_compartments(align_threshold: AlignThreshold = 0.2, top_k: TopK = 8) -> JSONResponse:
     fr = _CACHE.get()
     field = feeds_mod.velocity_field_from_feeds(fr)
     mesh = _mesh_from_field(field)
@@ -273,7 +292,7 @@ def api_compartments(align_threshold: float = 0.2, top_k: int = 8) -> JSONRespon
 # Tab 2: Agentic Loop — sense -> route -> gate -> receipt
 # ---------------------------------------------------------------------------
 @app.get("/api/agentic")
-def api_agentic(align_threshold: float = 0.2, n_obs: int = 6) -> JSONResponse:
+def api_agentic(align_threshold: AlignThreshold = 0.2, n_obs: Observations = 6) -> JSONResponse:
     fr = _CACHE.get()
     field = feeds_mod.velocity_field_from_feeds(fr)
     mesh = _mesh_from_field(field)
@@ -319,7 +338,7 @@ def api_agentic(align_threshold: float = 0.2, n_obs: int = 6) -> JSONResponse:
 # Tab 3: Receipt Chain — append-only hash-linked; verify / tamper
 # ---------------------------------------------------------------------------
 @app.get("/api/chain")
-def api_chain(n_obs: int = 5, align_threshold: float = 0.2) -> JSONResponse:
+def api_chain(n_obs: Observations = 5, align_threshold: AlignThreshold = 0.2) -> JSONResponse:
     fr = _CACHE.get()
     field = feeds_mod.velocity_field_from_feeds(fr)
     mesh = _mesh_from_field(field)
@@ -356,19 +375,27 @@ def api_chain(n_obs: int = 5, align_threshold: float = 0.2) -> JSONResponse:
 
 
 class TamperRequest(BaseModel):
-    chain_json: str
+    chain_json: str = Field(max_length=MAX_CHAIN_JSON_CHARS)
     tamper_index: int | None = None
-    tamper_field: str = "route_score"
+    tamper_field: str = Field("route_score", max_length=64)
 
 
 @app.post("/api/chain/verify")
 def api_chain_verify(req: TamperRequest) -> JSONResponse:
-    chain = ReceiptChain.from_json(req.chain_json)
+    try:
+        chain = ReceiptChain.from_json(req.chain_json)
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        # Not JSON, or not the {"links": [{index, prev_digest, step, digest}]}
+        # shape /api/chain returns: a client error, never a 500.
+        return JSONResponse(
+            {"detail": "chain_json is not a receipt chain as returned by /api/chain"},
+            status_code=422,
+        )
     tampered = False
     if req.tamper_index is not None and 0 <= req.tamper_index < len(chain.links):
         link = chain.links[req.tamper_index]
         f = req.tamper_field
-        if f in link.step:
+        if isinstance(link.step, dict) and f in link.step:
             # mutate the payload WITHOUT recomputing the digest -> breaks chain
             cur = link.step[f]
             if isinstance(cur, (int, float)):
@@ -391,7 +418,7 @@ def api_chain_verify(req: TamperRequest) -> JSONResponse:
 # Tab 4: Forecast — HONEST short-horizon PROJECTED trend (never invents data)
 # ---------------------------------------------------------------------------
 @app.get("/api/forecast")
-def api_forecast(align_threshold: float = 0.2, horizon: int = 6) -> JSONResponse:
+def api_forecast(align_threshold: AlignThreshold = 0.2, horizon: Horizon = 6) -> JSONResponse:
     """Build a short series of (compartment_count, mean_flow) by perturbing the
     live/sample field along its own trend, then extrapolate a linear projection.
     Everything beyond the measured/sample points is labeled PROJECTED.
