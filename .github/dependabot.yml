@@ -59,3 +59,28 @@ updates:
       semver-major-days: 21
       semver-minor-days: 7
       semver-patch-days: 3
+
+  # Hash-locked CI install for receipt-sign.yml
+  # (requirements/ci/receipt-sign.in -> receipt-sign.txt, `uv pip compile --generate-hashes`).
+  - package-ecosystem: "pip"
+    directory: "/requirements/ci"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/New_York"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+    groups:
+      pip-ci:
+        patterns:
+        - '*'
+        update-types:
+        - minor
+        - patch
+    cooldown:
+      default-days: 7
+      semver-major-days: 21
+      semver-minor-days: 7
+      semver-patch-days: 3
