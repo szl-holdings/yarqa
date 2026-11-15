@@ -4,8 +4,8 @@
 
 The adapter must DELEGATE to the shared szl_receipt (v0.2.0) shapes: an in-toto
 v1 Statement bound to the receipt digest plus the compliance-evidence bundle.
-These tests only run when szl_receipt is installed (the `attest` extra); they are
-skipped — never faked — otherwise.
+These tests only run when szl_receipt is installed (it is not on PyPI; see the
+README for the git install); they are skipped — never faked — otherwise.
 """
 import copy
 

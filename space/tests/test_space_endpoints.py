@@ -6,6 +6,7 @@ These run offline-safe: feeds may come up LIVE or SAMPLE depending on network
 reachability, but the endpoints must always respond with a valid, HONEST shape
 (badge in {LIVE, SAMPLE}, never synthetic-as-LIVE, no "proven" claims).
 """
+import json
 import sys
 from pathlib import Path
 
@@ -205,6 +206,91 @@ def test_chain_tamper_is_detected():
     assert tampered["verify"]["ok"] is False
     assert tampered["verify"]["first_broken_index"] == 2
 
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/agentic?n_obs=0",
+        "/api/agentic?n_obs=65",
+        "/api/chain?n_obs=1000000",
+        "/api/forecast?horizon=0",
+        "/api/forecast?horizon=25",
+        "/api/compartments?top_k=0",
+        "/api/compartments?top_k=129",
+        "/api/compartments?align_threshold=1.5",
+        "/api/compartments?align_threshold=nan",
+        "/api/forecast?align_threshold=-2",
+    ],
+)
+def test_public_api_rejects_out_of_range_work_before_any_computation(monkeypatch, path):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("an out-of-range request must be rejected before any work")
+
+    monkeypatch.setattr(space_app._CACHE, "get", fail_if_called)
+    r = client.get(path)
+    assert r.status_code == 422
+
+
+def test_public_api_accepts_the_ui_ranges_and_the_bounds():
+    for path in (
+        "/api/compartments?align_threshold=0&top_k=1",
+        "/api/compartments?align_threshold=0.9&top_k=16",
+        f"/api/compartments?top_k={space_app.MAX_TOP_K}",
+        "/api/forecast?align_threshold=0.9&horizon=12",
+        f"/api/forecast?horizon={space_app.MAX_HORIZON}",
+        f"/api/agentic?n_obs={space_app.MAX_OBSERVATIONS}",
+        f"/api/chain?n_obs={space_app.MAX_OBSERVATIONS}",
+    ):
+        assert client.get(path).status_code == 200, path
+    assert len(client.get("/api/forecast?horizon=12").json()["projected"]) == 12
+
+
+@pytest.mark.parametrize(
+    "chain_json",
+    [
+        "not json", "[]", '"text"', '{"links": [1]}', '{"links": [{"index": "x"}]}',
+        # json.loads yields inf here and int(inf) raises OverflowError, not ValueError
+        '{"links": [{"index": 1e400}]}', '{"links": [{"index": -Infinity}]}',
+        "[" * 5000,
+    ],
+)
+def test_chain_verify_rejects_malformed_chain_json(chain_json):
+    r = client.post("/api/chain/verify", json={"chain_json": chain_json})
+    assert r.status_code == 422
+    assert "receipt chain" in r.json()["detail"]
+
+
+def test_chain_verify_rejects_oversized_chain_json():
+    too_big = "x" * (space_app.MAX_CHAIN_JSON_CHARS + 1)
+    r = client.post("/api/chain/verify", json={"chain_json": too_big})
+    assert r.status_code == 422
+
+
+def test_chain_verify_never_tampers_a_non_object_step():
+    link = {"index": 0, "prev_digest": "0" * 64, "step": "route_score", "digest": "d"}
+    r = client.post(
+        "/api/chain/verify",
+        json={
+            "chain_json": json.dumps({"links": [link]}),
+            "tamper_index": 0,
+            "tamper_field": "route",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["tampered"] is False
+    assert r.json()["verify"]["ok"] is False  # the forged digest still fails
+
+
+def test_space_readme_states_the_enforced_bounds():
+    readme = " ".join((_SPACE / "README.md").read_text(encoding="utf-8").split())
+    for fragment in (
+        f"`n_obs` 1–{space_app.MAX_OBSERVATIONS}",
+        f"`horizon` 1–{space_app.MAX_HORIZON}",
+        f"`top_k` 1–{space_app.MAX_TOP_K}",
+        f"at most {space_app.MAX_CHAIN_JSON_CHARS:,} characters",
+    ):
+        assert fragment in readme, fragment
 
 def test_forecast_labels_projected_honestly():
     j = client.get("/api/forecast?horizon=6").json()

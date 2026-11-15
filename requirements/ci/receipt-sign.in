@@ -1,0 +1,12 @@
+# Inputs for .github/workflows/receipt-sign.yml (CI only; never shipped).
+# Compile the hash lock with:
+#   uv pip compile --generate-hashes --python-version 3.12 \
+#     --python-platform x86_64-unknown-linux-gnu \
+#     requirements/ci/receipt-sign.in -o requirements/ci/receipt-sign.txt
+# The workflow installs the lock with --require-hashes, then installs yarqa
+# itself with --no-deps.
+numpy>=1.23
+# yarqa.signing uses sigstore.models.ClientTrustConfig and
+# SigningContext.from_trust_config.
+sigstore>=4.0
+pytest>=9.1

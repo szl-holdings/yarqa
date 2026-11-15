@@ -55,10 +55,11 @@ JSON expressions are unchanged. No new operational action is introduced.
 ## Qualification
 
 Run the source suite with `python -m pytest -q tests`, and the shipped browser
-fixtures with `node --test tests/space_availability.test.cjs`. The qualified local
-source passed 134 Python tests, with two optional skips, and 18 Node response
-fixtures. The full Python invocation denied network transport before imports and
-recorded zero unmocked transport attempts.
+fixtures with `node --test tests/space_availability.test.cjs`. At the
+qualification recorded in #85 the local source passed 134 Python tests, with two
+optional skips, and 18 Node response fixtures; later changes added tests, so
+rerun both commands for current counts. That full Python invocation denied
+network transport before imports and recorded zero unmocked transport attempts.
 
 The browser verifier's dependencies are declared separately from the Space
 runtime in `.github/requirements/frontdoor-browser.in` and its hash lock:
@@ -111,8 +112,10 @@ insets are not a real-device notch test.
 
 ## Publication
 
-The sole `.github/workflows/hf-space.yml` writer remains pinned to reusable
-deployer `1b3255219cd1d5fa7ac850195b18fc907cac2cbf`. It publishes exact accepted
+The sole `.github/workflows/hf-space.yml` writer pins the reusable deployer by
+full commit SHA; its `uses:` line is the authority (#96 moved it from
+`1b3255219cd1d5fa7ac850195b18fc907cac2cbf` to
+`6c70b2675fa6b04fc4c85109fda52aeca3ec9f9f`). It publishes exact accepted
 main, derives the payload from the Dockerfile, preserves the separately owned
 Space card (`include-readme:false`), and retains credential, restart, source
 binding and immutable/runtime readback gates. Local presentation proof does not
