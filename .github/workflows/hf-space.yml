@@ -42,7 +42,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy exact source and attest live Space
-    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@a9546a72c550a83ed5ae535bdab61ccdfa689e65
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@6c70b2675fa6b04fc4c85109fda52aeca3ec9f9f
     with:
       hf-repo: SZLHOLDINGS/yarqa
       ref: ${{ github.sha }}
