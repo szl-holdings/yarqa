@@ -42,7 +42,7 @@ dependencies = ["numpy>=1.23"]
 [project.optional-dependencies]
 test = [
     "httpx==0.28.1",
-    "pip==26.2.2",
+    "pip==26.3",
     "pytest==9.2.0",
     "setuptools==84.2.1",
     "wheel==0.48.0",

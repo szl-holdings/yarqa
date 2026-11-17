@@ -81,7 +81,7 @@ jobs:
           required = {
               "fastapi": "0.162.2",
               "httpx": "0.28.1",
-              "pip": "26.2.2",
+              "pip": "26.3",
               "pytest": "9.2.0",
               "setuptools": "84.2.1",
               "uvicorn": "0.54.0",
@@ -210,7 +210,7 @@ jobs:
           }
           expected_runtime_versions = {
               "fastapi": "0.162.2",
-              "pip": "26.2.2",
+              "pip": "26.3",
               "setuptools": "84.2.1",
               "uvicorn": "0.54.0",
               "wheel": "0.48.0",
