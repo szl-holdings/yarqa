@@ -227,7 +227,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         expected_versions = {
             "fastapi": "0.162.0",
             "httpx": "0.28.1",
-            "pip": "26.2.2",
+            "pip": "26.3",
             "pytest": "9.2.0",
             "setuptools": "84.2.1",
             "uvicorn": "0.54.0",
@@ -250,7 +250,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
         self.assertTrue(
             {
                 "httpx==0.28.1",
-                "pip==26.2.2",
+                "pip==26.3",
                 "pytest==9.2.0",
                 "setuptools==84.2.1",
                 "wheel==0.48.0",
@@ -260,7 +260,7 @@ class SpaceCiDependencyContractTests(unittest.TestCase):
     def test_production_build_uses_the_same_exact_hashed_toolchain(self) -> None:
         production = _lock_entries(PRODUCTION_LOCK)
         expected_build_tools = {
-            "pip": "26.2.2",
+            "pip": "26.3",
             "setuptools": "84.2.1",
             "wheel": "0.48.0",
         }
