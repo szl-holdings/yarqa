@@ -69,8 +69,17 @@ cd space && python -m uvicorn app:app --port 7860
 
 ## Endpoints
 
-`/healthz` · `/livez` · `/api/build-info` · `/api/feeds` · `/api/compartments` ·
+`/healthz` · `/livez` · `/readyz` · `/api/build-info` · `/api/feeds` · `/api/compartments` ·
 `/api/agentic` · `/api/chain` · `POST /api/chain/verify` · `/api/forecast`
+
+`/livez` is a dependency-free process liveness probe. The source-only candidate
+`GET /readyz` is distinct: it returns HTTP 200 only with an exact 40-character
+lowercase source revision in the immutable image file, and HTTP 503 when that
+declaration is missing or malformed. It never accesses live feeds, model
+training, or external services, and is `Cache-Control: no-store`. Its
+`DECLARED_SOURCE_REVISION_ONLY` scope is **not independent source attestation,
+CFD validation, feed availability, or model-serving authorization**. This GitHub
+source candidate is **not yet deployed** to the live Hugging Face Space.
 
 Per-request work is bounded: `n_obs` 1–64, `horizon` 1–24, `top_k` 1–128 and
 `align_threshold` −1…1 (the UI stays inside these), and `chain_json` is at most
