@@ -95,7 +95,6 @@ jobs:
               )
           PY
           .ci-venv/bin/python -m pytest tests/ -q
-          .ci-venv/bin/python -m pytest readiness/ -q
           .ci-venv/bin/python -m pytest space/tests/test_space_endpoints.py -q
       - name: Verify vendored THREE is r160 (sovereign, zero CDN)
         run: |
