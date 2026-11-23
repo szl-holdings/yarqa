@@ -85,6 +85,25 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(d["per_dependency"]["pg"]["freshness"], FRESH)
 
 
+
+    def test_unproven_dominates_unknown_regardless_of_order(self):
+        ev = ReadinessEvaluator([
+            DeclaredDependency("queue", PROVEN),
+            DeclaredDependency("db", UNPROVEN, NOW - 1, 30),
+        ])
+        report = ev.evaluate(NOW)
+        self.assertEqual(report.status, NOT_READY)
+
+    def test_infinite_window_rejected(self):
+        with self.assertRaises(DeclarationError):
+            DeclaredDependency("pg", PROVEN, NOW - 1, window_s=float("inf"))
+
+    def test_package_exports_public_api(self):
+        import readiness
+        for name in readiness.__all__:
+            self.assertTrue(hasattr(readiness, name), name)
+
+
 class ContractTests(unittest.TestCase):
     def test_bad_name_rejected(self):
         with self.assertRaises(DeclarationError):

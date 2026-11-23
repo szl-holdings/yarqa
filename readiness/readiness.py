@@ -16,6 +16,7 @@ pull request.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -50,8 +51,8 @@ class DeclaredDependency:
             raise DeclarationError("dependency name must be a non-empty string")
         if self.proven not in (PROVEN, UNPROVEN):
             raise DeclarationError("proven must be 'proven' or 'unproven'")
-        if self.window_s is not None and self.window_s <= 0:
-            raise DeclarationError("window_s must be positive when provided")
+        if self.window_s is not None and (not math.isfinite(self.window_s) or self.window_s <= 0):
+            raise DeclarationError("window_s must be positive and finite when provided")
 
     def freshness(self, now_ts: float):
         """Return (freshness, age_s); absent data is unknown, never green."""
@@ -97,7 +98,8 @@ class ReadinessEvaluator:
             )
         per = {}
         reasons: List[str] = []
-        status = READY
+        hard_failure = False
+        unknown_freshness = False
         for dep in self.dependencies:
             freshness, age = dep.freshness(now)
             per[dep.name] = {
@@ -108,14 +110,21 @@ class ReadinessEvaluator:
                 "last_seen_ts": dep.last_seen_ts,
             }
             if dep.proven == UNPROVEN:
-                if status == READY:
-                    status = NOT_READY
+                hard_failure = True
                 reasons.append("unproven declared dependency: " + dep.name)
             if freshness == STALE:
-                status = NOT_READY
+                hard_failure = True
                 reasons.append("stale declared dependency: " + dep.name)
             elif freshness == UNKNOWN:
-                if status == READY:
-                    status = UNKNOWN_STATUS
+                unknown_freshness = True
                 reasons.append("freshness unknown for declared dependency: " + dep.name)
+        # Order-independent aggregate: a hard failure (unproven or stale) dominates
+        # unknown freshness regardless of declaration order; unknown freshness
+        # dominates READY. Never green unless every dependency is proven and fresh.
+        if hard_failure:
+            status = NOT_READY
+        elif unknown_freshness:
+            status = UNKNOWN_STATUS
+        else:
+            status = READY
         return ReadinessReport(status=status, evaluated_at=now, reasons=reasons, per_dependency=per)
