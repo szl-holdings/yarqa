@@ -1,1 +1,1 @@
-__all__ = ['DeclaredDependency', 'ReadinessEvaluator', 'ReadinessReport', 'DeclarationError']
+__all__ = ["DeclaredDependency", "ReadinessEvaluator", "ReadinessReport", "DeclarationError"]
