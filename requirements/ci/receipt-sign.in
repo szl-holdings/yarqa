@@ -5,7 +5,7 @@
 #     requirements/ci/receipt-sign.in -o requirements/ci/receipt-sign.txt
 # The workflow installs the lock with --require-hashes, then installs yarqa
 # itself with --no-deps.
-numpy>=1.23
+numpy>=2.5.5
 # yarqa.signing uses sigstore.models.ClientTrustConfig and
 # SigningContext.from_trust_config.
 sigstore>=4.0
