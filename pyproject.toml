@@ -55,7 +55,7 @@ Issues = "https://github.com/szl-holdings/yarqa/issues"
 Changelog = "https://github.com/szl-holdings/yarqa/releases"
 
 [tool.setuptools.packages.find]
-include = ["yarqa*"]
+include = ["yarqa*", "readiness*"]
 
 [tool.szl.release]
-import_names = ["yarqa"] # wheel top-level import names; the release gate fails if the built wheel differs
+import_names = ["yarqa", "readiness"] # wheel top-level import names; the release gate fails if the built wheel differs
