@@ -101,6 +101,51 @@ def test_build_info_has_source_identity_security_headers(monkeypatch, tmp_path):
     assert r.headers["x-content-type-options"] == "nosniff"
 
 
+def test_readyz_is_source_only_and_never_reads_feeds(monkeypatch, tmp_path):
+    _set_baked_revision(monkeypatch, tmp_path, "a" * 40)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("/readyz must not query feeds or start inference")
+
+    monkeypatch.setattr(space_app._CACHE, "get", fail_if_called)
+    r = client.get("/readyz")
+    assert r.status_code == 200
+    assert r.json() == {
+        "service": "yarqa-space",
+        "ready": True,
+        "readiness_scope": "DECLARED_SOURCE_REVISION_ONLY",
+        "build": {"state": "OBSERVED", "revision": "a" * 40},
+        "scientific_validation_ready": False,
+        "receipt_minted": False,
+    }
+    assert r.headers["cache-control"] == "no-store"
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.parametrize("revision", ["", "not-a-sha", "A" * 40, "f" * 40 + "\n"])
+def test_readyz_unbound_source_is_503(monkeypatch, tmp_path, revision):
+    _set_baked_revision(monkeypatch, tmp_path, revision)
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json() == {
+        "service": "yarqa-space",
+        "ready": False,
+        "readiness_scope": "DECLARED_SOURCE_REVISION_ONLY",
+        "build": {"state": "UNAVAILABLE", "revision": None},
+        "scientific_validation_ready": False,
+        "receipt_minted": False,
+    }
+    assert r.headers["cache-control"] == "no-store"
+
+
+def test_readyz_fails_closed_when_source_file_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(space_app, "_SOURCE_REVISION_FILE", tmp_path / "missing")
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json()["ready"] is False
+    assert r.json()["build"] == {"state": "UNAVAILABLE", "revision": None}
+
+
 def test_livez_is_local_only(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("/livez must not resolve external feeds")

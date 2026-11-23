@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import time
+from http import HTTPStatus
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -211,6 +212,26 @@ def livez() -> JSONResponse:
         "yarqa_version": yarqa.__version__,
         "yarqa_package_source": _YARQA_PACKAGE_SOURCE,
     })
+
+
+@app.get("/readyz")
+def readyz() -> JSONResponse:
+    """Admit the HTTP source-binding route, not CFD correctness or live feeds."""
+    build = _build_identity()
+    ready = build["state"] == "OBSERVED"
+    response = JSONResponse(
+        {
+            "service": "yarqa-space",
+            "ready": ready,
+            "readiness_scope": "DECLARED_SOURCE_REVISION_ONLY",
+            "build": build,
+            "scientific_validation_ready": False,
+            "receipt_minted": False,
+        },
+        status_code=HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/healthz")
